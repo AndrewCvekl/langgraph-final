@@ -1,0 +1,23 @@
+# LangGraph Customer Support Bot Dependencies
+# Python 3.12+
+
+# Core LangGraph/LangChain
+langgraph>=0.2.0
+langchain>=0.3.0
+langchain-openai>=0.2.0
+langchain-community>=0.3.0
+
+# Database
+sqlalchemy>=2.0.0
+
+# API Server (optional, for programmatic access)
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+sse-starlette>=2.0.0
+
+# Utilities
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+httpx>=0.27.0
+requests>=2.31.0
+
