@@ -22,22 +22,22 @@ from langchain_core.messages import SystemMessage
 from langchain_openai import ChatOpenAI
 
 from src.state import SupportState
-from src.tools.mocks import mock_genius_search, mock_youtube_lookup, check_song_in_catalog
+from src.tools.mocks import genius_search, youtube_lookup, check_song_in_catalog
 
 
 LYRICS_SYSTEM_PROMPT = """You are a helpful music assistant specializing in identifying songs from lyrics.
 
 You have access to these tools:
-1. **mock_genius_search**: Identify a song from lyrics the user provides
+1. **genius_search**: Identify a song from lyrics the user provides
 2. **check_song_in_catalog**: Check if an identified song is available in our store
-3. **mock_youtube_lookup**: Get a YouTube video link for a song
+3. **youtube_lookup**: Get a YouTube video link for a song
 
 ## Your Workflow:
 
 When a user provides lyrics or asks about a song:
-1. First, use mock_genius_search to identify the song
+1. First, use genius_search to identify the song
 2. If identified, use check_song_in_catalog to see if it's available for purchase
-3. Always use mock_youtube_lookup to provide a video link (users love this!)
+3. Always use youtube_lookup to provide a video link (users love this!)
 4. Give a comprehensive response with all the information
 
 ## Response Guidelines:
@@ -49,10 +49,10 @@ When a user provides lyrics or asks about a song:
 
 ## Example Flow:
 User: "What song goes like back in black I hit the sack"
-1. Call mock_genius_search("back in black I hit the sack")
+1. Call genius_search("back in black I hit the sack")
 2. Get result: "Back in Black" by AC/DC
 3. Call check_song_in_catalog("Back in Black", "AC/DC")
-4. Call mock_youtube_lookup("Back in Black", "AC/DC")
+4. Call youtube_lookup("Back in Black", "AC/DC")
 5. Respond with all the info!
 
 Be enthusiastic about helping users discover and enjoy music!"""
@@ -60,9 +60,9 @@ Be enthusiastic about helping users discover and enjoy music!"""
 
 # Tools available to the lyrics QA node
 LYRICS_TOOLS = [
-    mock_genius_search,
+    genius_search,
     check_song_in_catalog,
-    mock_youtube_lookup,
+    youtube_lookup,
 ]
 
 

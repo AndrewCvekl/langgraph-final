@@ -11,13 +11,20 @@ Provides an interactive terminal interface with:
 import os
 import sys
 import uuid
+import logging
 from typing import Any
 
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
-# Load environment variables
+# Load environment variables FIRST (before any service imports)
 load_dotenv()
+
+# Configure logging to show service initialization
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(message)s'
+)
 
 # Add src to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -121,6 +128,21 @@ def run_cli():
     # Compile the graph
     print(f"{Colors.DIM}Loading the support bot...{Colors.ENDC}")
     graph = compile_graph()
+    
+    # Initialize and show service status
+    print(f"\n{Colors.BOLD}API Service Status:{Colors.ENDC}")
+    from src.tools.services import get_genius_service, get_youtube_service, get_twilio_service
+    
+    genius = get_genius_service()
+    youtube = get_youtube_service()
+    twilio = get_twilio_service()
+    
+    def status_icon(is_live: bool) -> str:
+        return f"{Colors.GREEN}✓ LIVE{Colors.ENDC}" if is_live else f"{Colors.YELLOW}⚠ MOCK{Colors.ENDC}"
+    
+    print(f"  Genius:  {status_icon(genius.is_live)}")
+    print(f"  YouTube: {status_icon(youtube.is_live)}")
+    print(f"  Twilio:  {status_icon(twilio.is_live)}")
     
     # Create a thread ID for this session
     thread_id = str(uuid.uuid4())

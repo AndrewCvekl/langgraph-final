@@ -48,7 +48,9 @@ class SupportState(TypedDict):
     verified: bool
     verification_attempts: int
     masked_phone: str
-    verification_code: Optional[str]
+    verification_code: Optional[str]  # For mock mode
+    verification_id: Optional[str]  # Twilio verification ID for real SMS
+    phone: Optional[str]  # Full phone number for Twilio
     
     # Purchase flow
     pending_track_id: Optional[int]
@@ -80,6 +82,8 @@ def get_initial_state(customer_id: int = 1) -> dict:
         "verification_attempts": 0,
         "masked_phone": "",
         "verification_code": None,
+        "verification_id": None,
+        "phone": None,
         # Purchase flow
         "pending_track_id": None,
         "pending_track_name": None,

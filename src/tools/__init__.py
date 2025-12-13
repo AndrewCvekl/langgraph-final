@@ -15,9 +15,9 @@ from src.tools.account import (
 )
 from src.tools.purchase import create_invoice_for_track
 from src.tools.mocks import (
-    mock_genius_search,
-    mock_twilio_send_code,
-    mock_youtube_lookup,
+    genius_search,
+    twilio_send_code,
+    youtube_lookup,
 )
 
 # Catalog tools (read-only, public)
@@ -42,15 +42,15 @@ PURCHASE_TOOLS = [
     create_invoice_for_track,
 ]
 
-# Mock external API tools
-MOCK_TOOLS = [
-    mock_genius_search,
-    mock_youtube_lookup,
-    mock_twilio_send_code,
+# External API tools (real APIs with mock fallback)
+API_TOOLS = [
+    genius_search,
+    youtube_lookup,
+    twilio_send_code,
 ]
 
 # All tools combined
-ALL_TOOLS = CATALOG_TOOLS + ACCOUNT_TOOLS + PURCHASE_TOOLS + MOCK_TOOLS
+ALL_TOOLS = CATALOG_TOOLS + ACCOUNT_TOOLS + PURCHASE_TOOLS + API_TOOLS
 
 __all__ = [
     # Catalog
@@ -66,15 +66,15 @@ __all__ = [
     "update_my_email",
     # Purchase
     "create_invoice_for_track",
-    # Mocks
-    "mock_genius_search",
-    "mock_youtube_lookup",
-    "mock_twilio_send_code",
+    # External APIs
+    "genius_search",
+    "youtube_lookup",
+    "twilio_send_code",
     # Tool groups
     "CATALOG_TOOLS",
     "ACCOUNT_TOOLS",
     "PURCHASE_TOOLS",
-    "MOCK_TOOLS",
+    "API_TOOLS",
     "ALL_TOOLS",
 ]
 

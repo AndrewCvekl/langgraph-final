@@ -192,7 +192,9 @@ def compile_graph(checkpointer=None):
 
 
 # Default compiled graph for import
-graph = compile_graph()
+# NOTE: Don't provide a checkpointer when using langgraph dev / LangGraph Studio
+# The platform handles persistence automatically
+graph = build_graph().compile()
 
 
 if __name__ == "__main__":
