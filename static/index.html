@@ -1787,6 +1787,124 @@
         function parseListToTable(content) {
             // Detect ordered lists with structured data
             // Pattern: numbered items with key-value pairs or structured data
+
+            // ------------------------------------------------------------
+            // Pattern 0: Catalog "track blocks" (un-numbered, multi-line)
+            //
+            // Example block:
+            // We Will Rock You
+            // - **Album:** Greatest Hits I
+            // - **Artist:** Queen
+            // - **Price:** $0.99
+            // - **TrackId:** 2269
+            //
+            // Root cause this fixes:
+            // - LLM often emits "Track Name:" as a bold label in numbered lists,
+            //   which the old albumListPattern mistakenly captured as the value,
+            //   producing blank/incorrect table cells.
+            // ------------------------------------------------------------
+            function parseCatalogTrackBlocks(text) {
+                const normalized = String(text || '').replace(/\r\n/g, '\n');
+                const lines = normalized.split('\n');
+                const blocks = [];
+
+                // Pre-compute line start offsets in the original string
+                const lineStarts = [];
+                let cursor = 0;
+                for (const line of lines) {
+                    lineStarts.push(cursor);
+                    cursor += line.length + 1; // +1 for '\n' (ok if last line)
+                }
+
+                const kvPattern = /^-\s*\*\*(Album|Artist|Price|TrackId):\*\*\s*(.+)\s*$/i;
+
+                let current = null;
+                const finalize = () => {
+                    if (!current) return;
+                    const hasUsefulFields = Boolean(
+                        current.trackId || current.album || current.artist || current.price
+                    );
+                    // Avoid swallowing generic prose as a "track name"
+                    const isPlausibleTitle =
+                        current.name &&
+                        current.name.length <= 140 &&
+                        !/^(here are|these are|you can|please|great news|i can|i can't)/i.test(current.name);
+
+                    if (hasUsefulFields && isPlausibleTitle) {
+                        blocks.push(current);
+                    }
+                    current = null;
+                };
+
+                for (let i = 0; i < lines.length; i++) {
+                    const rawLine = lines[i];
+                    const line = rawLine.trim();
+                    const lineStart = lineStarts[i];
+
+                    if (!line) {
+                        // blank line ends a block
+                        finalize();
+                        continue;
+                    }
+
+                    // Bullet line inside a block
+                    if (rawLine.trimStart().startsWith('-')) {
+                        if (!current) continue;
+                        const m = line.match(kvPattern);
+                        if (m) {
+                            const key = m[1].toLowerCase();
+                            const val = (m[2] || '').trim();
+                            if (key === 'album') current.album = val;
+                            if (key === 'artist') current.artist = val;
+                            if (key === 'price') current.price = val.replace(/^\$/, '');
+                            if (key === 'trackid') current.trackId = val.replace(/[^\d]/g, '');
+                            current.end = lineStart + rawLine.length + 1;
+                        }
+                        continue;
+                    }
+
+                    // Start a new candidate block
+                    finalize();
+                    current = {
+                        name: line.replace(/^"(.+)"$/, '$1'),
+                        album: '',
+                        artist: '',
+                        price: '',
+                        trackId: '',
+                        start: lineStart,
+                        end: lineStart + rawLine.length + 1,
+                    };
+                }
+                finalize();
+
+                if (blocks.length < 2) {
+                    return { tableData: null, remaining: normalized };
+                }
+
+                const tableData = blocks.map((b, idx) => ({
+                    number: String(idx + 1),
+                    name: b.name,
+                    album: b.album,
+                    artist: b.artist,
+                    trackId: b.trackId,
+                    price: b.price ? (b.price.startsWith('$') ? b.price : `$${b.price}`) : '',
+                }));
+
+                const before = normalized.slice(0, blocks[0].start).trim();
+                const after = normalized.slice(blocks[blocks.length - 1].end).trim();
+                const remaining = [before, after].filter(Boolean).join('\n\n').trim();
+
+                return { tableData, remaining };
+            }
+
+            const catalogParsed = parseCatalogTrackBlocks(content);
+            if (catalogParsed.tableData) {
+                return { tableData: catalogParsed.tableData, tableType: 'catalog-tracks', remaining: catalogParsed.remaining };
+            }
+
+            // Pattern 0b: Numbered "label: value" lines
+            // Example: "1. **Track Name:** We Will Rock You"
+            const labeledNumberedPattern = /^(\d+)\.\s+\*\*([^*]+?):\*\*\s*(.+)\s*$/gm;
             
             // Pattern 1: Song lists with TrackId and Price
             // Example: "1. **Song Name** - TrackId: 123, Price: $0.99"
@@ -1820,6 +1938,21 @@
             let tableData = null;
             let tableType = null;
             let remaining = content;
+
+            const labeledMatches = Array.from(content.matchAll(labeledNumberedPattern));
+            if (labeledMatches.length >= 2) {
+                // Prefer extracting the value (to avoid the "Track Name:" blank table issue)
+                tableData = labeledMatches.map(match => ({
+                    number: match[1],
+                    label: match[2].trim(),
+                    value: match[3].trim(),
+                }));
+                tableType = 'labeled-numbered';
+                labeledMatches.forEach(match => {
+                    remaining = remaining.replace(match[0], '');
+                });
+                return { tableData, tableType, remaining: remaining.trim() };
+            }
             
             // Try to match song list pattern
             const songMatches = Array.from(content.matchAll(songListPattern));
@@ -1959,7 +2092,34 @@
             // Create header based on table type
             const headerRow = document.createElement('tr');
             
-            if (tableType === 'songs') {
+            if (tableType === 'catalog-tracks') {
+                headerRow.innerHTML = '<th>#</th><th>Track</th><th>Album</th><th>Artist</th><th>Track ID</th><th>Price</th>';
+                tableData.forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td class="table-number">${row.number}</td>
+                        <td><strong>${escapeHtml(row.name || '')}</strong></td>
+                        <td>${escapeHtml(row.album || '')}</td>
+                        <td>${escapeHtml(row.artist || '')}</td>
+                        <td class="table-id">${escapeHtml(row.trackId || '')}</td>
+                        <td class="table-price">${escapeHtml(row.price || '')}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } else if (tableType === 'labeled-numbered') {
+                // Best-effort: if all labels are the same, use it as the column title
+                const firstLabel = (tableData[0]?.label || 'Value').trim();
+                const uniformLabel = tableData.every(r => (r.label || '').trim() === firstLabel) ? firstLabel : 'Value';
+                headerRow.innerHTML = `<th>#</th><th>${escapeHtml(uniformLabel)}</th>`;
+                tableData.forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td class="table-number">${escapeHtml(row.number || '')}</td>
+                        <td><strong>${escapeHtml(row.value || '')}</strong></td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } else if (tableType === 'songs') {
                 headerRow.innerHTML = '<th>#</th><th>Track Name</th><th>Track ID</th><th>Price</th>';
                 tableData.forEach(row => {
                     const tr = document.createElement('tr');
@@ -2115,13 +2275,28 @@
                     .replace(/\n{2,}/g, '\n')
                     .trim();
                 
-                // Replace emojis with Lucide icons for design consistency
+                // Safe-ish rendering:
+                // - Escape all assistant text (avoid HTML injection)
+                // - Then apply a tiny markdown subset (+ icons) for nicer formatting
                 cleaned = cleaned
-                    .replace(/📱/g, `<span class="inline-icon">${icons.smartphone}</span>`)
-                    .replace(/✅/g, `<span class="inline-icon">${icons.checkCircle}</span>`)
-                    .replace(/❌/g, `<span class="inline-icon">${icons.xCircle}</span>`);
-                
-                textEl.innerHTML = cleaned;
+                    .replace(/📱/g, '__ICON_SMARTPHONE__')
+                    .replace(/✅/g, '__ICON_CHECK__')
+                    .replace(/❌/g, '__ICON_X__');
+
+                let safe = escapeHtml(cleaned);
+
+                // Minimal markdown: bold + line breaks
+                safe = safe
+                    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+                    .replace(/\n/g, '<br>');
+
+                // Icons (after escaping)
+                safe = safe
+                    .replace(/__ICON_SMARTPHONE__/g, `<span class="inline-icon">${icons.smartphone}</span>`)
+                    .replace(/__ICON_CHECK__/g, `<span class="inline-icon">${icons.checkCircle}</span>`)
+                    .replace(/__ICON_X__/g, `<span class="inline-icon">${icons.xCircle}</span>`);
+
+                textEl.innerHTML = safe;
                 bubbleEl.appendChild(textEl);
             }
         }

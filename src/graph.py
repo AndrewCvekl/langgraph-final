@@ -17,6 +17,7 @@ from langgraph.prebuilt import ToolNode
 from langgraph.checkpoint.memory import MemorySaver
 
 from src.state import SupportState
+from src.nodes.guardrails import guardrails_node
 from src.nodes.router import router_node
 from src.nodes.catalog_qa import catalog_qa_node, CATALOG_TOOLS
 from src.nodes.account_qa import account_qa_node, ACCOUNT_TOOLS
@@ -57,6 +58,13 @@ def route_after_router(state: SupportState) -> Literal[
     else:
         # Default to catalog_qa for music-related questions
         return "catalog_qa"
+
+
+def route_after_guardrails(state: SupportState) -> Literal["router", END]:
+    """If guardrails blocked, end; otherwise continue to router."""
+    if state.get("guardrail_blocked"):
+        return END
+    return "router"
 
 
 def should_continue_qa(state: SupportState) -> Literal["tools", "router", END]:
@@ -119,6 +127,7 @@ def build_graph() -> StateGraph:
     builder = StateGraph(SupportState)
     
     # Add nodes
+    builder.add_node("guardrails", guardrails_node)
     builder.add_node("router", router_node)
     builder.add_node("catalog_qa", catalog_qa_node)
     builder.add_node("account_qa", account_qa_node)
@@ -127,8 +136,17 @@ def build_graph() -> StateGraph:
     builder.add_node("purchase_flow", purchase_flow_node)
     builder.add_node("tools", tool_node)
     
-    # Entry point: always start with router
-    builder.add_edge(START, "router")
+    # Entry point: start with guardrails, then router
+    builder.add_edge(START, "guardrails")
+
+    builder.add_conditional_edges(
+        "guardrails",
+        route_after_guardrails,
+        {
+            "router": "router",
+            END: END,
+        },
+    )
     
     # Router routes to specialized nodes
     builder.add_conditional_edges(

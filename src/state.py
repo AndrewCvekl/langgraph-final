@@ -34,6 +34,10 @@ class SupportState(TypedDict):
         pending_genius_title: Song title from Genius lookup.
         pending_genius_artist: Artist name from Genius lookup.
         in_catalog: Whether the identified song is in our catalog.
+
+        # Guardrails
+        guardrail_blocked: Whether the request was blocked by guardrails.
+        guardrail_reason: Optional explanation for why it was blocked.
     """
     
     # Core state - always present
@@ -42,6 +46,10 @@ class SupportState(TypedDict):
     
     # Routing
     route: Optional[str]
+
+    # Guardrails
+    guardrail_blocked: bool
+    guardrail_reason: Optional[str]
     
     # Email verification flow
     pending_email: Optional[str]
@@ -76,6 +84,9 @@ def get_initial_state(customer_id: int = 1) -> dict:
         "messages": [],
         "customer_id": customer_id,
         "route": None,
+        # Guardrails
+        "guardrail_blocked": False,
+        "guardrail_reason": None,
         # Email verification
         "pending_email": None,
         "verified": False,
