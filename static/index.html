@@ -1,0 +1,2177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Langchain Music Store</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=TikTok+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --font-size: 16px;
+            --background: #FFFFFE;
+            --foreground: oklch(0.145 0 0);
+            --border: rgba(0, 0, 0, 0.1);
+            --muted: #ececf0;
+            --muted-foreground: #717182;
+            --radius: 0.625rem;
+            
+            /* Theme colors */
+            --teal-50: oklch(0.984 0.014 180.72);
+            --teal-200: oklch(0.91 0.096 180.426);
+            --teal-400: oklch(0.777 0.152 181.912);
+            --teal-500: oklch(0.704 0.14 182.503);
+            --teal-600: oklch(0.6 0.118 184.704);
+            --teal-700: oklch(0.511 0.096 186.391);
+            --teal-800: oklch(0.437 0.078 188.216);
+            --teal-900: oklch(0.386 0.063 188.416);
+            --amber-50: oklch(0.987 0.022 95.277);
+            --amber-500: oklch(0.769 0.188 70.08);
+            --amber-600: oklch(0.666 0.179 58.318);
+            --amber-900: oklch(0.414 0.112 45.904);
+            --orange-600: oklch(0.646 0.222 41.116);
+            --gray-50: oklch(0.985 0.002 247.839);
+            --gray-100: oklch(0.967 0.003 264.542);
+            --gray-200: oklch(0.928 0.006 264.531);
+            --gray-300: oklch(0.872 0.01 258.338);
+            --gray-400: oklch(0.707 0.022 261.325);
+            --gray-500: oklch(0.551 0.027 264.364);
+            --gray-600: oklch(0.446 0.03 256.802);
+            --gray-700: oklch(0.373 0.034 259.733);
+            --gray-900: oklch(0.21 0.034 264.665);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'TikTok Sans', sans-serif;
+            font-size: var(--font-size);
+            line-height: 1.5;
+            color: var(--foreground);
+            background: var(--background);
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        .app-container {
+            min-height: 100vh;
+            background: #FFFFFE;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Waveform background pattern */
+        .waveform-pattern {
+            position: absolute;
+            inset: 0;
+            opacity: 0.02;
+            pointer-events: none;
+        }
+
+        .waveform-pattern svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Chat layout */
+        .chat-wrapper {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            max-width: 56rem;
+            margin: 0 auto;
+            position: relative;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--gray-200);
+            background: #FFFFFE;
+            position: relative;
+            z-index: 10;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .logo-icon {
+            width: 2rem;
+            height: 2rem;
+            border-radius: 0.375rem;
+            object-fit: cover;
+        }
+
+        .header-title {
+            color: rgba(0, 0, 0, 0.9);
+            font-weight: 500;
+        }
+
+        .status-indicator {
+            width: 0.5rem;
+            height: 0.5rem;
+            border-radius: 50%;
+            background: var(--teal-500);
+            box-shadow: 0 0 8px color-mix(in oklab, var(--teal-500) 60%, transparent);
+            margin-left: 0.5rem;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        .status-indicator.hidden {
+            display: none;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.5); opacity: 0.7; }
+        }
+
+        .menu-button {
+            padding: 0.5rem;
+            border-radius: 0.5rem;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .menu-button:hover {
+            background: var(--gray-100);
+            transform: scale(1.05);
+        }
+
+        .menu-button svg {
+            width: 1.25rem;
+            height: 1.25rem;
+            color: var(--gray-600);
+        }
+
+        /* Messages area */
+        .messages-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 2rem 1.5rem;
+        }
+
+        .messages-container {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        /* Message bubbles */
+        .message {
+            display: flex;
+            gap: 0.75rem;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message.assistant {
+            justify-content: flex-start;
+        }
+
+        .message-avatar {
+            flex-shrink: 0;
+            width: 2rem;
+            height: 2rem;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-width: 2px;
+            border-style: solid;
+            background: white;
+        }
+
+        .message.assistant .message-avatar {
+            border-color: var(--teal-700);
+            box-shadow: 0 1px 3px color-mix(in oklab, var(--teal-500) 10%, transparent);
+        }
+
+        .message.user .message-avatar {
+            border-color: var(--orange-600);
+            box-shadow: 0 1px 3px color-mix(in oklab, var(--amber-500) 10%, transparent);
+        }
+
+        .message-avatar svg {
+            width: 1rem;
+            height: 1rem;
+        }
+
+        .message.assistant .message-avatar svg {
+            color: var(--teal-700);
+        }
+
+        .message.user .message-avatar svg {
+            color: var(--orange-600);
+        }
+
+        .message-content {
+            max-width: min(80%, 720px);
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        @media (max-width: 640px) {
+            .message-content {
+                max-width: 90%;
+                min-width: 0;
+            }
+        }
+
+        .message-bubble {
+            padding: 0.75rem 1rem;
+            border-radius: 0.625rem;
+            /* Keep line breaks, but don't preserve huge blank gaps */
+            white-space: pre-line;
+            word-break: break-word;
+            display: inline-block;
+            max-width: 100%;
+        }
+
+        .message.user .message-bubble {
+            background: var(--amber-600);
+            color: white;
+            box-shadow: 0 4px 6px -1px color-mix(in oklab, var(--amber-500) 20%, transparent);
+        }
+
+        .message.assistant .message-bubble {
+            background: var(--gray-100);
+            color: rgba(0, 0, 0, 0.9);
+            box-shadow: 0 1px 3px color-mix(in oklab, var(--teal-500) 5%, transparent);
+            /* Critical: make assistant bubbles block-level so media can be 100% width
+               without causing "shrink-to-fit" percentage sizing glitches. */
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            min-width: 0;
+            box-sizing: border-box;
+        }
+
+        .message-text {
+            width: 100%;
+            min-width: 0;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            flex-shrink: 0;
+        }
+
+        .message.user .message-content {
+            align-items: flex-end;
+        }
+
+        .message.assistant .message-content {
+            align-items: flex-start;
+        }
+
+        /* Inline icons in messages */
+        .inline-icon {
+            display: inline-flex;
+            align-items: center;
+            vertical-align: middle;
+            margin: 0 0.25rem;
+        }
+
+        .inline-icon svg {
+            width: 1.1em;
+            height: 1.1em;
+            display: inline-block;
+            color: inherit;
+        }
+
+        /* Tool usage display */
+        .tool-container {
+            border: 2px solid var(--teal-700);
+            border-radius: 0.625rem;
+            overflow: hidden;
+            background: white;
+            box-shadow: 0 4px 6px -1px color-mix(in oklab, var(--teal-500) 5%, transparent);
+        }
+
+        .tool-header {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.75rem 1rem;
+            background: var(--teal-700);
+            border: none;
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+
+        .tool-header:hover {
+            background: var(--teal-800);
+        }
+
+        .tool-header-left {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .tool-header svg {
+            width: 1rem;
+            height: 1rem;
+            color: white;
+        }
+
+        .tool-name {
+            color: white;
+            font-weight: 500;
+            font-size: 0.875rem;
+        }
+
+        .tool-chevron {
+            transition: transform 0.3s ease;
+        }
+
+        .tool-chevron.expanded {
+            transform: rotate(180deg);
+        }
+
+        .tool-content {
+            overflow: hidden;
+            max-height: 0;
+            transition: max-height 0.3s ease;
+        }
+
+        .tool-content.expanded {
+            max-height: 500px;
+        }
+
+        .tool-content-inner {
+            padding: 0.75rem 1rem;
+            border-top: 2px solid var(--teal-700);
+            background: white;
+        }
+
+        .tool-section {
+            margin-bottom: 0.5rem;
+        }
+
+        .tool-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .tool-section-label {
+            font-size: 0.75rem;
+            color: color-mix(in oklab, var(--teal-700) 80%, transparent);
+            margin-bottom: 0.25rem;
+        }
+
+        .tool-section-content {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+            font-size: 0.75rem;
+            color: color-mix(in oklab, var(--gray-700) 90%, transparent);
+            background: var(--gray-50);
+            padding: 0.5rem;
+            border-radius: 0.25rem;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        /* Node indicator */
+        .node-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.375rem 0.75rem;
+            background: var(--gray-100);
+            border-radius: 9999px;
+            font-size: 0.7rem;
+            color: var(--gray-500);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+            animation: fadeIn 0.2s ease-out;
+        }
+
+        .node-indicator.active {
+            color: var(--teal-700);
+            border: 1px solid color-mix(in oklab, var(--teal-600) 50%, transparent);
+        }
+
+        .node-dot {
+            width: 0.375rem;
+            height: 0.375rem;
+            background: var(--teal-500);
+            border-radius: 50%;
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        /* Typing indicator */
+        .typing-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .typing-avatar {
+            flex-shrink: 0;
+            width: 2rem;
+            height: 2rem;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--teal-200);
+            background: white;
+            box-shadow: 0 1px 3px color-mix(in oklab, var(--teal-500) 10%, transparent);
+        }
+
+        .typing-avatar svg {
+            width: 1rem;
+            height: 1rem;
+            color: var(--teal-700);
+        }
+
+        .typing-content {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .typing-icon svg {
+            width: 1.25rem;
+            height: 1.25rem;
+            color: var(--teal-700);
+            animation: iconSpin 0.3s ease-out;
+        }
+
+        @keyframes iconSpin {
+            from { opacity: 0; transform: scale(0.8) rotate(-10deg); }
+            to { opacity: 1; transform: scale(1) rotate(0); }
+        }
+
+        .typing-text {
+            color: color-mix(in oklab, var(--gray-500) 80%, transparent);
+            font-size: 0.875rem;
+        }
+
+        .typing-dots {
+            display: flex;
+            gap: 0.25rem;
+        }
+
+        .typing-dot {
+            width: 0.375rem;
+            height: 0.375rem;
+            background: var(--teal-500);
+            border-radius: 50%;
+            animation: typingBounce 1s ease-in-out infinite;
+        }
+
+        .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes typingBounce {
+            0%, 60%, 100% { transform: scale(1); opacity: 0.3; }
+            30% { transform: scale(1.3); opacity: 1; }
+        }
+
+        /* Input area */
+        .input-area {
+            padding: 1rem 1.5rem;
+            border-top: 1px solid var(--gray-200);
+            background: #FFFFFE;
+            position: relative;
+            z-index: 10;
+        }
+
+        .input-container {
+            max-width: 48rem;
+            margin: 0 auto;
+        }
+
+        .input-wrapper {
+            display: flex;
+            align-items: flex-end;
+            gap: 0.75rem;
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 0.75rem;
+            border: 2px solid var(--gray-200);
+            transition: all 0.3s ease;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        }
+
+        .input-wrapper.focused {
+            border-color: var(--teal-600);
+            box-shadow: 0 10px 15px -3px color-mix(in oklab, var(--teal-600) 20%, transparent);
+        }
+
+        .message-input {
+            flex: 1;
+            padding: 0.75rem 1rem;
+            border: none;
+            background: transparent;
+            resize: none;
+            outline: none;
+            font-family: inherit;
+            font-size: 1rem;
+            line-height: 1.5;
+            min-height: 52px;
+            max-height: 200px;
+            color: var(--gray-900);
+        }
+
+        .message-input::placeholder {
+            color: var(--gray-400);
+        }
+
+        .send-button {
+            margin: 0.5rem;
+            padding: 0.5rem;
+            border-radius: 0.5rem;
+            border: 2px solid var(--gray-300);
+            background: var(--gray-100);
+            color: var(--gray-400);
+            cursor: not-allowed;
+            transition: all 0.15s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .send-button.active {
+            background: var(--teal-600);
+            border-color: var(--teal-600);
+            color: white;
+            cursor: pointer;
+            box-shadow: 0 4px 6px -1px color-mix(in oklab, var(--teal-500) 30%, transparent);
+        }
+
+        .send-button.active:hover {
+            background: var(--teal-700);
+        }
+
+        .send-button svg {
+            width: 1.25rem;
+            height: 1.25rem;
+        }
+
+        .input-footer {
+            text-align: center;
+            color: color-mix(in oklab, var(--gray-400) 80%, transparent);
+            margin-top: 0.75rem;
+            font-size: 0.875rem;
+        }
+
+        /* Welcome screen */
+        .welcome-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 3rem 2.5rem;
+            max-width: 480px;
+            margin: 0 auto;
+            /* Glass card with teal border */
+            background: rgba(255, 255, 255, 0.5);
+            border-radius: 1.5rem;
+            border: 2px solid var(--teal-600);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+
+        /* Staggered entrance animations */
+        @keyframes fadeSlideUp {
+            from {
+                opacity: 0;
+                transform: translateY(16px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .welcome-icon {
+            width: 4rem;
+            height: 4rem;
+            margin-bottom: 1.5rem;
+            color: var(--teal-600);
+            animation: fadeSlideUp 0.5s ease-out 0.1s both;
+        }
+        
+        .welcome-icon svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .welcome-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            color: var(--gray-900);
+            margin-bottom: 0.5rem;
+            animation: fadeSlideUp 0.5s ease-out 0.2s both;
+        }
+
+        .welcome-subtitle {
+            color: var(--gray-500);
+            max-width: 400px;
+            margin-bottom: 1.5rem;
+            font-weight: 400;
+            letter-spacing: 0.01em;
+            opacity: 0.85;
+            animation: fadeSlideUp 0.5s ease-out 0.3s both;
+        }
+
+        .quick-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            justify-content: center;
+            max-width: 500px;
+            animation: fadeSlideUp 0.5s ease-out 0.4s both;
+        }
+
+        .quick-action {
+            padding: 0.625rem 1rem;
+            background: white;
+            border: 1px solid var(--gray-200);
+            border-radius: 9999px;
+            color: var(--gray-600);
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .quick-action:hover {
+            background: var(--gray-50);
+            border-color: var(--teal-600);
+            color: var(--teal-700);
+            transform: translateY(-2px);
+        }
+
+        /* Interrupt modal */
+        .interrupt-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            animation: fadeIn 0.2s ease-out;
+        }
+
+        .interrupt-overlay.hidden {
+            display: none;
+        }
+
+        .interrupt-modal {
+            background: white;
+            border-radius: 1rem;
+            padding: 2.5rem;
+            max-width: 600px;
+            width: 90%;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            animation: slideUp 0.3s ease-out;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .interrupt-icon {
+            width: 4rem;
+            height: 4rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1.5rem;
+            color: var(--gray-700);
+        }
+
+        .interrupt-icon svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .interrupt-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: var(--gray-900);
+        }
+
+        .interrupt-message {
+            color: var(--gray-700);
+            margin-bottom: 1.5rem;
+            font-size: 1rem;
+            line-height: 1.6;
+        }
+
+        .interrupt-message-content {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .interrupt-message p {
+            margin: 0;
+            line-height: 1.6;
+        }
+
+        .interrupt-message strong {
+            color: var(--gray-900);
+            font-weight: 600;
+        }
+
+        .interrupt-detail-row {
+            display: flex;
+            align-items: baseline;
+            gap: 0.5rem;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid var(--gray-200);
+        }
+
+        .interrupt-detail-row:last-child {
+            border-bottom: none;
+        }
+
+        .interrupt-detail-label {
+            font-weight: 600;
+            color: var(--teal-700);
+            min-width: 100px;
+            font-size: 0.9375rem;
+        }
+
+        .interrupt-detail-value {
+            color: var(--gray-900);
+            font-weight: 500;
+            flex: 1;
+        }
+
+        .interrupt-message-text {
+            color: var(--gray-600);
+            margin-top: 0.75rem;
+            font-size: 0.9375rem;
+            line-height: 1.6;
+        }
+
+        .interrupt-options {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+
+        .interrupt-option {
+            padding: 1rem 2rem;
+            background: var(--gray-100);
+            border: 1px solid var(--gray-200);
+            border-radius: 9999px;
+            color: var(--gray-600);
+            font-size: 1.0625rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            flex: 1;
+            min-width: 140px;
+        }
+
+        .interrupt-option:hover {
+            background: var(--gray-50);
+            border-color: var(--teal-600);
+            color: var(--teal-700);
+        }
+
+        .interrupt-input-group {
+            display: flex;
+            gap: 0.75rem;
+            margin-top: 1.5rem;
+        }
+
+        .interrupt-input-group.hidden {
+            display: none;
+        }
+
+        .interrupt-input {
+            flex: 1;
+            padding: 0.875rem 1.25rem;
+            border: 2px solid var(--gray-200);
+            border-radius: 0.5rem;
+            font-family: inherit;
+            font-size: 1.0625rem;
+            outline: none;
+            transition: border-color 0.2s ease;
+        }
+
+        .interrupt-input:focus {
+            border-color: var(--teal-600);
+        }
+
+        .interrupt-submit {
+            padding: 0.875rem 1.75rem;
+            background: linear-gradient(135deg, var(--teal-600), var(--teal-700));
+            border: none;
+            border-radius: 0.5rem;
+            color: white;
+            font-family: inherit;
+            font-size: 1.0625rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .interrupt-submit:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px color-mix(in oklab, var(--teal-500) 40%, transparent);
+        }
+
+        /* Scrollbar */
+        .messages-area::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .messages-area::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .messages-area::-webkit-scrollbar-thumb {
+            background: var(--gray-300);
+            border-radius: 3px;
+        }
+
+        .messages-area::-webkit-scrollbar-thumb:hover {
+            background: var(--gray-400);
+        }
+
+        /* Hidden utility */
+        .hidden {
+            display: none !important;
+        }
+
+        /* Basic inline video thumbnail card inside assistant bubbles */
+        .video-card {
+            margin-top: 0.75rem;
+            border-radius: 0.75rem;
+            overflow: hidden;
+            background: #000;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            width: 100%;
+            max-width: 560px;
+            aspect-ratio: 16 / 9;
+            position: relative;
+        }
+
+        .video-card a {
+            position: absolute;
+            inset: 0;
+            display: block;
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .video-card img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+            transform: scale(1.01);
+            filter: saturate(1.05);
+        }
+
+        .video-card::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.05) 55%);
+            pointer-events: none;
+        }
+
+        .video-card-play {
+            position: absolute;
+            inset: 0;
+            display: grid;
+            place-items: center;
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        .video-card-play span {
+            width: 64px;
+            height: 64px;
+            border-radius: 999px;
+            background: rgba(0, 0, 0, 0.55);
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            display: grid;
+            place-items: center;
+            backdrop-filter: blur(8px);
+        }
+
+        .video-card-play svg {
+            width: 22px;
+            height: 22px;
+            margin-left: 2px;
+            fill: white;
+            opacity: 0.95;
+        }
+
+        .video-card:hover img {
+            transform: scale(1.03);
+            transition: transform 200ms ease;
+        }
+
+        .video-card:focus-within {
+            outline: 3px solid color-mix(in oklab, var(--teal-500) 65%, transparent);
+            outline-offset: 3px;
+        }
+
+        /* mp4 fallback */
+        .video-embed {
+            margin-top: 0.75rem;
+            border-radius: 0.75rem;
+            overflow: hidden;
+            background: #000;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            width: 100%;
+            max-width: 560px;
+        }
+
+        .video-embed video {
+            width: 100%;
+            height: auto;
+            display: block;
+            border: 0;
+        }
+
+        .youtube-card {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border-radius: 0.75rem;
+            color: inherit;
+            text-decoration: none;
+            cursor: pointer;
+            white-space: normal;
+        }
+
+        .youtube-card img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+            filter: saturate(1.05);
+            transform: scale(1.01);
+        }
+
+        .youtube-card::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.05) 55%);
+        }
+
+        .youtube-card-play {
+            position: absolute;
+            inset: 0;
+            display: grid;
+            place-items: center;
+            z-index: 2;
+        }
+
+        .youtube-card-play span {
+            width: 64px;
+            height: 64px;
+            border-radius: 999px;
+            background: rgba(0, 0, 0, 0.55);
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            display: grid;
+            place-items: center;
+            backdrop-filter: blur(8px);
+        }
+
+        .youtube-card-play svg {
+            width: 22px;
+            height: 22px;
+            margin-left: 2px;
+            fill: white;
+            opacity: 0.95;
+        }
+
+        .youtube-card-meta {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            padding: 0.75rem 0.9rem;
+            z-index: 2;
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .youtube-card-meta .label {
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.92);
+            font-size: 0.95rem;
+            line-height: 1.15;
+        }
+
+        .youtube-card-meta .sub {
+            margin-top: 0.15rem;
+            color: rgba(255, 255, 255, 0.75);
+            font-size: 0.8rem;
+        }
+
+        .youtube-card:hover img {
+            transform: scale(1.03);
+            transition: transform 200ms ease;
+        }
+
+        .youtube-card:focus-visible {
+            outline: 3px solid color-mix(in oklab, var(--teal-500) 65%, transparent);
+            outline-offset: 3px;
+        }
+
+        /* Links in messages */
+        .message-link {
+            color: var(--teal-600);
+            text-decoration: underline;
+            text-underline-offset: 2px;
+            transition: color 0.15s ease;
+        }
+
+        .message-link:hover {
+            color: var(--teal-700);
+        }
+
+        .message.user .message-link {
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .message.user .message-link:hover {
+            color: white;
+        }
+
+        /* Beautiful green tables for ordered lists */
+        .message-table {
+            margin: 1rem 0;
+            width: 100%;
+            border-collapse: collapse;
+            border-radius: 0.625rem;
+            overflow: hidden;
+            box-shadow: 0 2px 8px color-mix(in oklab, var(--teal-500) 15%, transparent);
+            background: white;
+        }
+
+        .message-table thead {
+            background: linear-gradient(135deg, var(--teal-600), var(--teal-700));
+            color: white;
+        }
+
+        .message-table thead th {
+            padding: 0.875rem 1rem;
+            text-align: left;
+            font-weight: 600;
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.025em;
+        }
+
+        .message-table thead th:first-child {
+            padding-left: 1.25rem;
+        }
+
+        .message-table thead th:last-child {
+            padding-right: 1.25rem;
+        }
+
+        .message-table tbody tr {
+            border-bottom: 1px solid var(--teal-200);
+            transition: background-color 0.15s ease;
+        }
+
+        .message-table tbody tr:last-child {
+            border-bottom: none;
+        }
+
+        .message-table tbody tr:hover {
+            background: var(--teal-50);
+        }
+
+        .message-table tbody td {
+            padding: 0.875rem 1rem;
+            color: var(--gray-700);
+            font-size: 0.9375rem;
+        }
+
+        .message-table tbody td:first-child {
+            padding-left: 1.25rem;
+            font-weight: 500;
+            color: var(--gray-900);
+        }
+
+        .message-table tbody td:last-child {
+            padding-right: 1.25rem;
+        }
+
+        .message-table tbody td strong {
+            color: var(--gray-900);
+            font-weight: 600;
+        }
+
+        .message-table .table-number {
+            color: var(--teal-700);
+            font-weight: 600;
+            min-width: 2rem;
+        }
+
+        .message-table .table-price {
+            color: var(--teal-700);
+            font-weight: 600;
+        }
+
+        .message-table .table-date {
+            color: var(--gray-600);
+            font-size: 0.875rem;
+        }
+
+        .message-table .table-id {
+            color: var(--teal-700);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+            font-size: 0.875rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Waveform background pattern -->
+        <div class="waveform-pattern">
+            <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+                <defs>
+                    <pattern id="waveform" x="0" y="0" width="200" height="100" patternUnits="userSpaceOnUse">
+                        <path d="M0 50 Q 25 30, 50 50 T 100 50 T 150 50 T 200 50" stroke="currentColor" fill="none" stroke-width="2" style="color: var(--teal-900)" />
+                        <path d="M0 50 Q 25 70, 50 50 T 100 50 T 150 50 T 200 50" stroke="currentColor" fill="none" stroke-width="2" style="color: var(--amber-900); opacity: 0.5" />
+                    </pattern>
+                </defs>
+                <rect width="100%" height="100%" fill="url(#waveform)" />
+            </svg>
+        </div>
+
+        <div class="chat-wrapper">
+            <!-- Header -->
+            <header class="header">
+                <div class="header-left">
+                    <img class="logo-icon" src="/static/logo.png" alt="Langchain Music Store Logo">
+                    <span class="header-title">Langchain Music Store</span>
+                    <div class="status-indicator hidden" id="status-indicator"></div>
+                </div>
+                <button class="menu-button">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="3" y1="12" x2="21" y2="12"/>
+                        <line x1="3" y1="6" x2="21" y2="6"/>
+                        <line x1="3" y1="18" x2="21" y2="18"/>
+                    </svg>
+                </button>
+            </header>
+
+            <!-- Messages -->
+            <div class="messages-area" id="messages-area">
+                <div class="messages-container" id="messages-container">
+                    <!-- Welcome screen -->
+                    <div class="welcome-screen" id="welcome-screen">
+                        <div class="welcome-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="8" cy="18" r="4"/>
+                                <path d="M12 18V2l7 4"/>
+                            </svg>
+                        </div>
+                        <h2 class="welcome-title">Welcome, Luís!</h2>
+                        <p class="welcome-subtitle">I'm here to help you browse our catalog, manage your account, or find that song stuck in your head.</p>
+                        <div class="quick-actions">
+                            <button class="quick-action" data-message="What genres do you have?">Browse Genres</button>
+                            <button class="quick-action" data-message="Show me my profile">My Account</button>
+                            <button class="quick-action" data-message="Show me artists in Rock">Rock Artists</button>
+                            <button class="quick-action" data-message="I remember lyrics: back in black I hit the sack">Find by Lyrics</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Input -->
+            <div class="input-area">
+                <div class="input-container">
+                    <div class="input-wrapper" id="input-wrapper">
+                        <textarea 
+                            class="message-input" 
+                            id="message-input" 
+                            placeholder="Send a message..."
+                            rows="1"
+                        ></textarea>
+                        <button class="send-button" id="send-button">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="12" y1="19" x2="12" y2="5"/>
+                                <polyline points="5 12 12 5 19 12"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <p class="input-footer">Press Enter to send, Shift+Enter for new line</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Interrupt Modal -->
+    <div class="interrupt-overlay hidden" id="interrupt-overlay">
+        <div class="interrupt-modal">
+            <div class="interrupt-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="6" y="4" width="4" height="16"/>
+                    <rect x="14" y="4" width="4" height="16"/>
+                </svg>
+            </div>
+            <h3 class="interrupt-title" id="interrupt-title">Input Required</h3>
+            <p class="interrupt-message" id="interrupt-message">Please provide your response:</p>
+            <div class="interrupt-options" id="interrupt-options"></div>
+            <div class="interrupt-input-group hidden" id="interrupt-input-group">
+                <input type="text" class="interrupt-input" id="interrupt-input" placeholder="Your response...">
+                <button class="interrupt-submit" id="interrupt-submit">Submit</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Icons as SVG strings
+        const icons = {
+            music: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`,
+            user: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`,
+            wrench: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>`,
+            chevronDown: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`,
+            piano: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 8c-1.4 0-2.6-.8-3.2-2A6.87 6.87 0 0 0 2 9v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-8.5C22 9.6 20.4 8 18.5 8"></path><path d="M2 14h20"></path><path d="M6 14v4"></path><path d="M10 14v4"></path><path d="M14 14v4"></path><path d="M18 14v4"></path></svg>`,
+            drum: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m2 2 8 8"></path><path d="m22 2-8 8"></path><ellipse cx="12" cy="9" rx="10" ry="5"></ellipse><path d="M7 13.4v7.9"></path><path d="M12 14v8"></path><path d="M17 13.4v7.9"></path><path d="M2 9v8a10 5 0 0 0 20 0V9"></path></svg>`,
+            micVocal: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m11 7.601-5.994 8.19a1 1 0 0 0 .1 1.298l.817.818a1 1 0 0 0 1.314.087L15.09 12"></path><path d="M16.5 21.174C15.5 20.5 14.372 20 13 20c-2.058 0-3.928 2.356-6 2-2.072-.356-2.775-3.369-1.5-4.5"></path><circle cx="16" cy="7" r="5"></circle></svg>`,
+            audioLines: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 10v3"></path><path d="M6 6v11"></path><path d="M10 3v18"></path><path d="M14 8v7"></path><path d="M18 5v13"></path><path d="M22 10v3"></path></svg>`,
+            smartphone: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"></rect><path d="M12 18h.01"></path></svg>`,
+            checkCircle: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`,
+            xCircle: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg>`,
+        };
+
+        const loadingStates = [
+            { icon: 'piano', text: 'Tuning...' },
+            { icon: 'drum', text: 'Composing...' },
+            { icon: 'micVocal', text: 'Orchestrating...' },
+            { icon: 'audioLines', text: 'Harmonizing...' },
+        ];
+
+        const API_BASE = '';
+        let sessionId = null;
+        let currentRunId = null;
+        let isProcessing = false;
+        let loadingStateIndex = 0;
+        let loadingInterval = null;
+
+        // DOM Elements
+        const messagesArea = document.getElementById('messages-area');
+        const messagesContainer = document.getElementById('messages-container');
+        const welcomeScreen = document.getElementById('welcome-screen');
+        const messageInput = document.getElementById('message-input');
+        const inputWrapper = document.getElementById('input-wrapper');
+        const sendButton = document.getElementById('send-button');
+        const statusIndicator = document.getElementById('status-indicator');
+        const interruptOverlay = document.getElementById('interrupt-overlay');
+        const interruptTitle = document.getElementById('interrupt-title');
+        const interruptMessage = document.getElementById('interrupt-message');
+        const interruptOptions = document.getElementById('interrupt-options');
+        const interruptInputGroup = document.getElementById('interrupt-input-group');
+        const interruptInput = document.getElementById('interrupt-input');
+        const interruptSubmit = document.getElementById('interrupt-submit');
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            // Quick action buttons
+            document.querySelectorAll('.quick-action').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const message = btn.dataset.message;
+                    messageInput.value = message;
+                    sendMessage();
+                });
+            });
+
+            // Send button
+            sendButton.addEventListener('click', sendMessage);
+
+            // Enter to send (Shift+Enter for newline)
+            messageInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
+
+            // Input focus styling
+            messageInput.addEventListener('focus', () => {
+                inputWrapper.classList.add('focused');
+            });
+
+            messageInput.addEventListener('blur', () => {
+                inputWrapper.classList.remove('focused');
+            });
+
+            // Auto-resize textarea and update button state
+            messageInput.addEventListener('input', () => {
+                messageInput.style.height = 'auto';
+                messageInput.style.height = Math.min(messageInput.scrollHeight, 200) + 'px';
+                updateSendButton();
+            });
+
+            // Interrupt handlers
+            interruptSubmit.addEventListener('click', () => {
+                const value = interruptInput.value.trim();
+                if (value) {
+                    submitInterrupt(value);
+                }
+            });
+            interruptInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const value = interruptInput.value.trim();
+                    if (value) {
+                        submitInterrupt(value);
+                    }
+                }
+            });
+
+        });
+
+        function updateSendButton() {
+            const hasContent = messageInput.value.trim().length > 0;
+            if (hasContent) {
+                sendButton.classList.add('active');
+            } else {
+                sendButton.classList.remove('active');
+            }
+        }
+
+        async function sendMessage() {
+            const message = messageInput.value.trim();
+            if (!message || isProcessing) return;
+
+            // Hide welcome screen
+            welcomeScreen.classList.add('hidden');
+
+            // Add user message
+            addMessage('user', message);
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
+            updateSendButton();
+
+            isProcessing = true;
+            sendButton.classList.remove('active');
+            statusIndicator.classList.remove('hidden');
+
+            try {
+                // Start chat
+                const response = await fetch(`${API_BASE}/api/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessionId, message })
+                });
+
+                const data = await response.json();
+                sessionId = data.session_id;
+                currentRunId = data.run_id;
+
+                // Stream the response
+                await streamResponse(data.run_id);
+            } catch (error) {
+                console.error('Error:', error);
+                addMessage('assistant', 'Sorry, something went wrong. Please try again.');
+            } finally {
+                isProcessing = false;
+                statusIndicator.classList.add('hidden');
+                updateSendButton();
+            }
+        }
+
+        async function streamResponse(runId) {
+            // Add typing indicator
+            const typingEl = addTypingIndicator();
+            startLoadingAnimation();
+
+            try {
+                const response = await fetch(`${API_BASE}/api/stream/${runId}`);
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                let buffer = '';
+                let currentNodeEl = null;
+                let typingRemoved = false;
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = JSON.parse(line.slice(6));
+                            
+                            // Remove typing indicator on first content
+                            if (!typingRemoved) {
+                                typingEl.remove();
+                                stopLoadingAnimation();
+                                typingRemoved = true;
+                            }
+
+                            switch (data.type) {
+                                case 'node_start':
+                                    // Hidden - only showing tool calls
+                                    break;
+
+                                case 'node_end':
+                                    // Hidden - only showing tool calls
+                                    break;
+
+                                case 'tool_call':
+                                    addToolCall(data.name, data.args);
+                                    break;
+
+                                case 'tool_result':
+                                    addToolResult(data.name, data.content);
+                                    break;
+
+                                case 'message':
+                                    addMessage('assistant', data.content);
+                                    break;
+
+                                case 'interrupt':
+                                    showInterrupt(data.data);
+                                    return;
+
+                                case 'error':
+                                    addMessage('assistant', `Error: ${data.message}`);
+                                    break;
+
+                                case 'done':
+                                    break;
+                            }
+                        }
+                    }
+                }
+
+                if (!typingRemoved) {
+                    typingEl.remove();
+                    stopLoadingAnimation();
+                }
+            } catch (error) {
+                console.error('Stream error:', error);
+                typingEl.remove();
+                stopLoadingAnimation();
+                addMessage('assistant', 'Connection lost. Please try again.');
+            }
+        }
+
+        function addMessage(role, content) {
+            const messageEl = document.createElement('div');
+            messageEl.className = `message ${role}`;
+            
+            const avatarIcon = role === 'user' ? icons.user : icons.music;
+
+            messageEl.innerHTML = `
+                <div class="message-avatar">${avatarIcon}</div>
+                <div class="message-content">
+                    <div class="message-bubble"></div>
+                </div>
+            `;
+
+            const bubbleEl = messageEl.querySelector('.message-bubble');
+            if (bubbleEl) {
+                renderMessageBubble(bubbleEl, role, content);
+            }
+            
+            messagesContainer.appendChild(messageEl);
+            scrollToBottom();
+            return messageEl;
+        }
+
+        function addTypingIndicator() {
+            const el = document.createElement('div');
+            el.className = 'typing-indicator';
+            el.id = 'typing-indicator';
+            el.innerHTML = `
+                <div class="typing-avatar">${icons.music}</div>
+                <div class="typing-content">
+                    <div class="typing-icon" id="typing-icon">${icons.piano}</div>
+                    <span class="typing-text" id="typing-text">Tuning...</span>
+                    <div class="typing-dots">
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                    </div>
+                </div>
+            `;
+            messagesContainer.appendChild(el);
+            scrollToBottom();
+            return el;
+        }
+
+        function startLoadingAnimation() {
+            loadingStateIndex = 0;
+            loadingInterval = setInterval(() => {
+                loadingStateIndex = (loadingStateIndex + 1) % loadingStates.length;
+                const state = loadingStates[loadingStateIndex];
+                const iconEl = document.getElementById('typing-icon');
+                const textEl = document.getElementById('typing-text');
+                if (iconEl && textEl) {
+                    iconEl.innerHTML = icons[state.icon];
+                    textEl.textContent = state.text;
+                }
+            }, 800);
+        }
+
+        function stopLoadingAnimation() {
+            if (loadingInterval) {
+                clearInterval(loadingInterval);
+                loadingInterval = null;
+            }
+        }
+
+        function addNodeIndicator(nodeName, active = false) {
+            const el = document.createElement('div');
+            el.className = `node-indicator ${active ? 'active' : ''}`;
+            el.innerHTML = `
+                ${active ? '<div class="node-dot"></div>' : ''}
+                <span>${formatNodeName(nodeName)}</span>
+            `;
+            messagesContainer.appendChild(el);
+            scrollToBottom();
+            return el;
+        }
+
+        function addToolCall(name, args) {
+            const id = 'tool-' + Date.now();
+            const el = document.createElement('div');
+            el.className = 'message assistant';
+            
+            const argsStr = Object.entries(args || {})
+                .filter(([k]) => k !== 'config')
+                .map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
+                .join('\n');
+            
+            el.innerHTML = `
+                <div class="message-avatar">${icons.music}</div>
+                <div class="message-content">
+                    <div class="tool-container">
+                        <button class="tool-header" onclick="toggleTool('${id}')">
+                            <div class="tool-header-left">
+                                ${icons.wrench}
+                                <span class="tool-name">${name}</span>
+                            </div>
+                            <div class="tool-chevron" id="${id}-chevron">${icons.chevronDown}</div>
+                        </button>
+                        <div class="tool-content" id="${id}-content">
+                            <div class="tool-content-inner">
+                                <div class="tool-section">
+                                    <div class="tool-section-label">Input:</div>
+                                    <pre class="tool-section-content">${escapeHtml(argsStr || 'No arguments')}</pre>
+                                </div>
+                                <div class="tool-section" id="${id}-output" style="display: none;">
+                                    <div class="tool-section-label">Output:</div>
+                                    <pre class="tool-section-content" id="${id}-output-content"></pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            messagesContainer.appendChild(el);
+            scrollToBottom();
+            
+            // Store reference for adding output later
+            window.lastToolId = id;
+        }
+
+        function addToolResult(name, content) {
+            const id = window.lastToolId;
+            if (id) {
+                const outputSection = document.getElementById(`${id}-output`);
+                const outputContent = document.getElementById(`${id}-output-content`);
+                if (outputSection && outputContent) {
+                    outputSection.style.display = 'block';
+                    outputContent.textContent = content;
+                }
+            }
+        }
+
+        window.toggleTool = function(id) {
+            const content = document.getElementById(`${id}-content`);
+            const chevron = document.getElementById(`${id}-chevron`);
+            if (content && chevron) {
+                content.classList.toggle('expanded');
+                chevron.classList.toggle('expanded');
+            }
+        };
+
+        function formatInterruptMessage(message) {
+            if (!message) return '';
+            
+            // Pattern to match structured data like "**Track:** 2 A.M. **Track ID:** 1404 **Price:** $0.99"
+            const detailPattern = /\*\*([^:]+?):\*\*\s*([^*\n]+?)(?=\s*\*\*|$)/g;
+            const matches = Array.from(message.matchAll(detailPattern));
+            
+            // If we have structured data, format it nicely
+            if (matches.length > 0) {
+                const details = [];
+                let remainingText = message;
+                
+                matches.forEach(match => {
+                    const label = match[1].trim();
+                    const value = match[2].trim();
+                    details.push({ label, value });
+                    remainingText = remainingText.replace(match[0], '');
+                });
+                
+                // Clean up remaining text (remove extra spaces, newlines)
+                remainingText = remainingText
+                    .replace(/\n+/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                
+                let html = '';
+                
+                // Add details in a structured format
+                if (details.length > 0) {
+                    html += '<div class="interrupt-message-content">';
+                    details.forEach(detail => {
+                        html += `
+                            <div class="interrupt-detail-row">
+                                <span class="interrupt-detail-label">${escapeHtml(detail.label)}</span>
+                                <span class="interrupt-detail-value">${escapeHtml(detail.value)}</span>
+                            </div>
+                        `;
+                    });
+                    html += '</div>';
+                }
+                
+                // Add any remaining text
+                if (remainingText) {
+                    html += `<p class="interrupt-message-text">${escapeHtml(remainingText)}</p>`;
+                }
+                
+                return html;
+            }
+            
+            // If no structured data, just format the text with markdown-style bold
+            return message
+                .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+                .replace(/\n/g, '<br>');
+        }
+
+        function showInterrupt(data) {
+            interruptTitle.textContent = data.title || 'Input Required';
+            
+            // Format the message with better styling
+            const message = data.message || 'Please provide your response:';
+            interruptMessage.innerHTML = formatInterruptMessage(message);
+            
+            const interruptType = data.type || 'confirm';
+            
+            // Clear previous state
+            interruptOptions.innerHTML = '';
+            interruptInput.value = '';
+            
+            if (interruptType === 'input') {
+                // Show input field, hide buttons
+                interruptInputGroup.classList.remove('hidden');
+                interruptOptions.style.display = 'none';
+                interruptInput.focus();
+            } else {
+                // Show buttons, hide input field
+                interruptInputGroup.classList.add('hidden');
+                interruptOptions.style.display = 'flex';
+                
+                // Populate buttons from options
+                if (data.options && data.options.length > 0) {
+                    data.options.forEach(option => {
+                        const btn = document.createElement('button');
+                        btn.className = 'interrupt-option';
+                        btn.textContent = option;
+                        btn.addEventListener('click', () => {
+                            submitInterrupt(option);
+                        });
+                        interruptOptions.appendChild(btn);
+                    });
+                }
+            }
+            
+            interruptOverlay.classList.remove('hidden');
+        }
+
+        async function submitInterrupt(value) {
+            if (!value) return;
+
+            interruptOverlay.classList.add('hidden');
+
+            // Show the user's response
+            addMessage('user', value);
+
+            statusIndicator.classList.remove('hidden');
+
+            try {
+                // Resume the interrupt
+                await fetch(`${API_BASE}/api/interrupt/${currentRunId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ resume_value: value })
+                });
+
+                // Continue streaming
+                await streamResponse(currentRunId);
+            } catch (error) {
+                console.error('Interrupt error:', error);
+                addMessage('assistant', 'Error resuming. Please try again.');
+            } finally {
+                statusIndicator.classList.add('hidden');
+            }
+        }
+
+        function scrollToBottom() {
+            messagesArea.scrollTop = messagesArea.scrollHeight;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function parseListToTable(content) {
+            // Detect ordered lists with structured data
+            // Pattern: numbered items with key-value pairs or structured data
+            
+            // Pattern 1: Song lists with TrackId and Price
+            // Example: "1. **Song Name** - TrackId: 123, Price: $0.99"
+            // Also handles: "1.  **Song Name** - TrackId: 123, Price: $0.99" (extra spaces)
+            const songListPattern = /(\d+)\.\s+\*\*([^*]+?)\*\*\s*-\s*TrackId:\s*(\d+),\s*Price:\s*\$?([\d.]+)/g;
+            
+            // Pattern 2: Purchase history with Invoice ID, Date, Total
+            // Example: "1. **Invoice ID:** 415 - **Date:** 2025-12-13 - **Total:** $0.99"
+            const purchaseHistoryPattern = /(\d+)\.\s+\*\*Invoice ID:\*\*\s*(\d+)\s*-\s*\*\*Date:\*\*\s*([\d-]+)\s*-\s*\*\*Total:\*\*\s*\$?([\d.]+)/g;
+            
+            // Pattern 3: Invoice details with Track Name, Artist, Album, Unit Price, Quantity
+            // Example: "- **Track Name:** Song - **Artist:** Artist - **Album:** Album - **Unit Price:** $0.99 - **Quantity:** 1"
+            const invoiceDetailsPattern = /-\s*\*\*Track Name:\*\*\s*([^-]+?)\s*-\s*\*\*Artist:\*\*\s*([^-]+?)\s*-\s*\*\*Album:\*\*\s*([^-]+?)\s*-\s*\*\*Unit Price:\*\*\s*\$?([\d.]+)\s*-\s*\*\*Quantity:\*\*\s*(\d+)/g;
+            
+            // Pattern 4: Purchase complete details
+            // Example: "- Invoice ID: 415 - Track: Track 7 - Amount: $0.99 - Date: 2025-12-13 18:59:38"
+            const purchaseCompletePattern = /-\s*Invoice ID:\s*(\d+)\s*-\s*Track:\s*([^-]+?)\s*-\s*Amount:\s*\$?([\d.]+)\s*-\s*Date:\s*([^\n]+)/g;
+            
+            // Pattern 5: Simple album lists (numbered with just bold text)
+            // Example: "1. **For Those About To Rock We Salute You**"
+            const albumListPattern = /(\d+)\.\s+\*\*([^*]+?)\*\*/g;
+            
+            // Pattern 6: Profile information (bulleted key-value pairs)
+            // Example: "- **Name:** Luís Gonçalves"
+            const profilePattern = /-\s*\*\*([^:]+?):\*\*\s*([^\n]+)/g;
+            
+            // Pattern 7: Simple numbered lists (plain text, no bold)
+            // Example: "1. Alternative" or "1. Apocalyptica"
+            const simpleListPattern = /^(\d+)\.\s+(.+)$/gm;
+            
+            let tableData = null;
+            let tableType = null;
+            let remaining = content;
+            
+            // Try to match song list pattern
+            const songMatches = Array.from(content.matchAll(songListPattern));
+            if (songMatches.length >= 2) {
+                tableData = songMatches.map(match => ({
+                    number: match[1],
+                    name: match[2].trim(),
+                    trackId: match[3],
+                    price: `$${match[4]}`
+                }));
+                tableType = 'songs';
+                // Remove matched content and album headers
+                songMatches.forEach(match => {
+                    remaining = remaining.replace(match[0], '');
+                });
+                // Remove album headers that might be between matches
+                remaining = remaining.replace(/\*\*Album:[^*]+\*\*/g, '').trim();
+            }
+            // Try purchase history pattern
+            else {
+                const purchaseMatches = Array.from(content.matchAll(purchaseHistoryPattern));
+                if (purchaseMatches.length >= 2) {
+                    tableData = purchaseMatches.map(match => ({
+                        number: match[1],
+                        invoiceId: match[2],
+                        date: match[3],
+                        total: `$${match[4]}`
+                    }));
+                    tableType = 'purchase-history';
+                    purchaseMatches.forEach(match => {
+                        remaining = remaining.replace(match[0], '');
+                    });
+                }
+                // Try invoice details pattern
+                else {
+                    const invoiceMatches = Array.from(content.matchAll(invoiceDetailsPattern));
+                    if (invoiceMatches.length > 0) {
+                        tableData = invoiceMatches.map(match => ({
+                            trackName: match[1].trim(),
+                            artist: match[2].trim(),
+                            album: match[3].trim(),
+                            unitPrice: `$${match[4]}`,
+                            quantity: match[5]
+                        }));
+                        tableType = 'invoice-details';
+                        invoiceMatches.forEach(match => {
+                            remaining = remaining.replace(match[0], '');
+                        });
+                    }
+                    // Try purchase complete pattern
+                    else {
+                        const purchaseCompleteMatches = Array.from(content.matchAll(purchaseCompletePattern));
+                        if (purchaseCompleteMatches.length > 0) {
+                            tableData = purchaseCompleteMatches.map(match => ({
+                                invoiceId: match[1],
+                                track: match[2].trim(),
+                                amount: `$${match[3]}`,
+                                date: match[4].trim()
+                            }));
+                            tableType = 'purchase-complete';
+                            purchaseCompleteMatches.forEach(match => {
+                                remaining = remaining.replace(match[0], '');
+                            });
+                        }
+                        // Try album list pattern (simple numbered list with bold text)
+                        else {
+                            const albumMatches = Array.from(content.matchAll(albumListPattern));
+                            // Only match if it's a simple list (no TrackId/Price) and has at least 2 items
+                            if (albumMatches.length >= 2) {
+                                // Check if any match has TrackId/Price to avoid false positives
+                                const hasComplexData = albumMatches.some(m => m[0].includes('TrackId') || m[0].includes('Price'));
+                                if (!hasComplexData) {
+                                    tableData = albumMatches.map(match => ({
+                                        number: match[1],
+                                        name: match[2].trim()
+                                    }));
+                                    tableType = 'albums';
+                                    albumMatches.forEach(match => {
+                                        remaining = remaining.replace(match[0], '');
+                                    });
+                                }
+                            }
+                            // Try profile information pattern
+                            if (!tableData) {
+                                const profileMatches = Array.from(content.matchAll(profilePattern));
+                                if (profileMatches.length >= 2) {
+                                    tableData = profileMatches.map(match => ({
+                                        label: match[1].trim(),
+                                        value: match[2].trim()
+                                    }));
+                                    tableType = 'profile';
+                                    profileMatches.forEach(match => {
+                                        remaining = remaining.replace(match[0], '');
+                                    });
+                                }
+                            }
+                            // Try simple numbered list pattern (genres, artists, etc.)
+                            if (!tableData) {
+                                const simpleMatches = Array.from(content.matchAll(simpleListPattern));
+                                // Only match if we have at least 2 items and they're not already matched by other patterns
+                                if (simpleMatches.length >= 2) {
+                                    // Check if any match has bold text or structured data to avoid false positives
+                                    const hasBoldOrStructured = simpleMatches.some(m => 
+                                        m[0].includes('**') || 
+                                        m[0].includes('TrackId') || 
+                                        m[0].includes('Price') ||
+                                        m[0].includes('Invoice') ||
+                                        m[0].includes('Date:')
+                                    );
+                                    if (!hasBoldOrStructured) {
+                                        tableData = simpleMatches.map(match => ({
+                                            number: match[1],
+                                            name: match[2].trim()
+                                        }));
+                                        tableType = 'simple-list';
+                                        simpleMatches.forEach(match => {
+                                            remaining = remaining.replace(match[0], '');
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            return { tableData, tableType, remaining: remaining.trim() };
+        }
+
+        function createTable(tableData, tableType) {
+            const table = document.createElement('table');
+            table.className = 'message-table';
+            
+            const thead = document.createElement('thead');
+            const tbody = document.createElement('tbody');
+            
+            // Create header based on table type
+            const headerRow = document.createElement('tr');
+            
+            if (tableType === 'songs') {
+                headerRow.innerHTML = '<th>#</th><th>Track Name</th><th>Track ID</th><th>Price</th>';
+                tableData.forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td class="table-number">${row.number}</td>
+                        <td><strong>${escapeHtml(row.name)}</strong></td>
+                        <td class="table-id">${row.trackId}</td>
+                        <td class="table-price">${row.price}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } else if (tableType === 'purchase-history') {
+                headerRow.innerHTML = '<th>#</th><th>Invoice ID</th><th>Date</th><th>Total</th>';
+                tableData.forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td class="table-number">${row.number}</td>
+                        <td class="table-id">${row.invoiceId}</td>
+                        <td class="table-date">${row.date}</td>
+                        <td class="table-price">${row.total}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } else if (tableType === 'invoice-details') {
+                headerRow.innerHTML = '<th>Track Name</th><th>Artist</th><th>Album</th><th>Unit Price</th><th>Quantity</th>';
+                tableData.forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td><strong>${escapeHtml(row.trackName)}</strong></td>
+                        <td>${escapeHtml(row.artist)}</td>
+                        <td>${escapeHtml(row.album)}</td>
+                        <td class="table-price">${row.unitPrice}</td>
+                        <td>${row.quantity}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } else if (tableType === 'purchase-complete') {
+                headerRow.innerHTML = '<th>Invoice ID</th><th>Track</th><th>Amount</th><th>Date</th>';
+                tableData.forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td class="table-id">${row.invoiceId}</td>
+                        <td><strong>${escapeHtml(row.track)}</strong></td>
+                        <td class="table-price">${row.amount}</td>
+                        <td class="table-date">${row.date}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } else if (tableType === 'albums') {
+                headerRow.innerHTML = '<th>#</th><th>Album Name</th>';
+                tableData.forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td class="table-number">${row.number}</td>
+                        <td><strong>${escapeHtml(row.name)}</strong></td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } else if (tableType === 'profile') {
+                headerRow.innerHTML = '<th>Field</th><th>Value</th>';
+                tableData.forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td><strong>${escapeHtml(row.label)}</strong></td>
+                        <td>${escapeHtml(row.value)}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } else if (tableType === 'simple-list') {
+                headerRow.innerHTML = '<th>#</th><th>Name</th>';
+                tableData.forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td class="table-number">${row.number}</td>
+                        <td>${escapeHtml(row.name)}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            }
+            
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+            table.appendChild(tbody);
+            
+            return table;
+        }
+
+        function renderMessageBubble(bubbleEl, role, content) {
+            // Always render via DOM APIs (no HTML injection)
+            bubbleEl.textContent = '';
+
+            if (role !== 'assistant') {
+                bubbleEl.textContent = content ?? '';
+                return;
+            }
+
+            const raw = String(content ?? '');
+
+            // Minimal media detection: first YouTube URL (plain or markdown) OR first .mp4 URL
+            // Matches:
+            // - https://www.youtube.com/watch?v=VIDEO_ID
+            // - https://youtu.be/VIDEO_ID
+            // - [Watch on YouTube](https://www.youtube.com/watch?v=VIDEO_ID)
+            const ytMarkdownRegex = /\[([^\]]+)\]\((https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtube\.com\/embed\/|youtu\.be\/)([a-zA-Z0-9_-]{11})[^\)]*)\)/i;
+            const ytRegex = /https?:\/\/(?:www\.)?(?:youtube\.com\/embed\/|youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})(?:[^\s]*)?/i;
+            const mp4Regex = /https?:\/\/[^\s]+?\.mp4(?:\?[^\s]*)?/i;
+
+            const ytMdMatch = raw.match(ytMarkdownRegex);
+            const ytMatch = ytMdMatch ? null : raw.match(ytRegex);
+            const mp4Match = raw.match(mp4Regex);
+
+            let remaining = raw;
+
+            if (ytMdMatch) {
+                const url = ytMdMatch[2];
+                const videoId = ytMdMatch[3];
+                remaining = remaining.replace(ytMdMatch[0], '').trim();
+                bubbleEl.appendChild(createYouTubeThumbnailCard(videoId, url));
+            } else if (ytMatch) {
+                const videoId = ytMatch[1];
+                const url = ytMatch[0];
+                remaining = remaining.replace(url, '').trim();
+                bubbleEl.appendChild(createYouTubeThumbnailCard(videoId, url));
+            } else if (mp4Match) {
+                const url = mp4Match[0];
+                remaining = remaining.replace(url, '').trim();
+                bubbleEl.appendChild(createMp4Embed(url));
+            }
+
+            // Check for ordered lists that should be converted to tables
+            const { tableData, tableType, remaining: textAfterTable } = parseListToTable(remaining);
+            
+            if (tableData && tableData.length > 0) {
+                const table = createTable(tableData, tableType);
+                bubbleEl.appendChild(table);
+                remaining = textAfterTable;
+            }
+
+            if (remaining) {
+                const textEl = document.createElement('div');
+                textEl.className = 'message-text';
+                // Compact + cleanup:
+                // - remove any leftover bracket label
+                // - remove a standalone "YouTube:" line (URL becomes a thumbnail card)
+                // - remove trailing "on YouTube:" or "YouTube:" when URL was extracted (including following newline)
+                // - collapse multiple blank lines into a single newline
+                let cleaned = remaining
+                    .replace(/\r\n/g, '\n')
+                    .replace(/\[Watch on YouTube\]\s*/gi, '')
+                    .replace(/^\s*youtube:\s*$/gmi, '')
+                    .replace(/on YouTube:\s*\n*/gi, 'on YouTube. ')
+                    .replace(/YouTube:\s*\n*/gi, 'YouTube. ')
+                    .replace(/\n{2,}/g, '\n')
+                    .trim();
+                
+                // Replace emojis with Lucide icons for design consistency
+                cleaned = cleaned
+                    .replace(/📱/g, `<span class="inline-icon">${icons.smartphone}</span>`)
+                    .replace(/✅/g, `<span class="inline-icon">${icons.checkCircle}</span>`)
+                    .replace(/❌/g, `<span class="inline-icon">${icons.xCircle}</span>`);
+                
+                textEl.innerHTML = cleaned;
+                bubbleEl.appendChild(textEl);
+            }
+        }
+
+        function createYouTubeThumbnailCard(videoId, watchUrl) {
+            const wrap = document.createElement('div');
+            wrap.className = 'video-card';
+
+            const a = document.createElement('a');
+            a.href = watchUrl || `https://www.youtube.com/watch?v=${videoId}`;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.ariaLabel = 'Open YouTube video in a new tab';
+
+            const img = document.createElement('img');
+            img.alt = 'YouTube video thumbnail';
+            img.loading = 'lazy';
+            img.referrerPolicy = 'no-referrer';
+            img.src = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+            img.onerror = function () {
+                this.onerror = null;
+                this.src = `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`;
+            };
+
+            const play = document.createElement('div');
+            play.className = 'video-card-play';
+            play.innerHTML = '<span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg></span>';
+
+            a.appendChild(img);
+            wrap.appendChild(a);
+            wrap.appendChild(play);
+            return wrap;
+        }
+
+        function createMp4Embed(url) {
+            const wrap = document.createElement('div');
+            wrap.className = 'video-embed';
+
+            const video = document.createElement('video');
+            video.src = url;
+            video.controls = true;
+            video.preload = 'metadata';
+            wrap.appendChild(video);
+
+            return wrap;
+        }
+
+        function formatNodeName(name) {
+            return name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        }
+    </script>
+</body>
+</html>

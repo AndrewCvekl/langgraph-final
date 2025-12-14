@@ -33,8 +33,9 @@ PURCHASE_DECLINE_PATTERNS = re.compile(
 
 # Simple affirmative/negative responses that should NOT trigger lyrics_flow
 # These are conversational responses, not lyrics!
+# Also includes purchase-related phrases that shouldn't be treated as lyrics
 SIMPLE_RESPONSE_PATTERNS = re.compile(
-    r'^(yes|no|yep|yeah|yup|nope|nah|sure|ok|okay|please|thanks|thank you|cool|great|awesome|nice|perfect|sounds good|definitely|absolutely|of course|no thanks|not really|maybe|i guess)[\s!?.]*$',
+    r'^(yes|no|yep|yeah|yup|nope|nah|sure|ok|okay|please|thanks|thank you|cool|great|awesome|nice|perfect|sounds good|definitely|absolutely|of course|no thanks|not really|maybe|i guess|can i buy it|i want to buy it|buy it|purchase it|i\'ll take it|get it for me)[\s!?.]*$',
     re.IGNORECASE
 )
 

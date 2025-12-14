@@ -48,7 +48,9 @@ CRITICAL: When a customer wants to purchase a track by name (like "I want to buy
 2. Show them the track details
 3. Include [PURCHASE_INTENT: TrackId=X, Name=Y, Price=Z] to trigger the purchase flow
 
-Never include [PURCHASE_INTENT:...] without first verifying the track exists in our catalog!"""
+Never include [PURCHASE_INTENT:...] without first verifying the track exists in our catalog!
+
+IMPORTANT: If the conversation history indicates the customer ALREADY OWNS a track, do NOT include [PURCHASE_INTENT:...]. Just let them know they already own it and it's in their library."""
 
 
 CATALOG_TOOLS = [
@@ -95,10 +97,8 @@ def catalog_qa_node(state: SupportState) -> dict:
             except ValueError:
                 result["pending_track_price"] = 0.99
             result["route"] = "purchase_flow"
-            
-            # Don't add any message - purchase_flow will handle all messaging
-            # This prevents duplicate/confusing messages
-            result["messages"] = []
+            # Keep the message - ensures user always sees something even if purchase_flow
+            # hits an interrupt or encounters issues
     
     return result
 

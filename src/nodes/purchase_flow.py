@@ -11,6 +11,7 @@ from langgraph.types import interrupt, Command
 
 from src.state import SupportState
 from src.tools.purchase import create_invoice_for_track
+from src.tools.account import check_if_already_purchased
 
 
 def purchase_flow_node(
@@ -36,6 +37,20 @@ def purchase_flow_node(
         return Command(
             update={
                 "messages": [AIMessage(content="I'd be happy to help you make a purchase! Could you please tell me which track you'd like to buy? You can search for a track by name or browse our catalog.")],
+                "pending_track_id": None,
+                "pending_track_name": None,
+                "pending_track_price": None,
+            },
+            goto="__end__"
+        )
+    
+    # Check if the customer already owns this track
+    config = {"configurable": {"customer_id": customer_id}}
+    ownership_check = check_if_already_purchased.invoke({"track_id": track_id}, config=config)
+    if "Yes" in ownership_check:
+        return Command(
+            update={
+                "messages": [AIMessage(content=f"Great news! You already own **{track_name}** - it's in your library! Is there anything else I can help you with?")],
                 "pending_track_id": None,
                 "pending_track_name": None,
                 "pending_track_price": None,
@@ -71,7 +86,6 @@ This will charge your account and add the track to your library.""",
         )
     
     # Execute the purchase
-    config = {"configurable": {"customer_id": customer_id}}
     result = create_invoice_for_track.invoke({"track_id": track_id}, config=config)
     
     # Clear purchase state and end the turn cleanly.

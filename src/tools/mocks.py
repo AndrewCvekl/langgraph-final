@@ -107,7 +107,7 @@ def youtube_lookup(song_title: str, artist: str) -> str:
         artist: The artist name.
         
     Returns:
-        YouTube link and video info.
+        YouTube video info with a YouTube URL that the frontend can auto-embed.
     """
     youtube = get_youtube_service()
     mode = "LIVE API" if youtube.is_live else "MOCK"
@@ -117,17 +117,14 @@ def youtube_lookup(song_title: str, artist: str) -> str:
     logger.info(f"[youtube_lookup] Mode: {mode}, Query: '{query}'")
     
     result = youtube.search_video(query)
-    logger.info(f"[youtube_lookup] Found: '{result['title']}' ({result['video_id']}) on {result['channel']}")
+    video_id = result['video_id']
+    logger.info(f"[youtube_lookup] Found: '{result['title']}' ({video_id}) on {result['channel']}")
     
-    source = "" if youtube.is_live else "\n\nNote: This is a mock link for demo purposes."
+    source = "" if youtube.is_live else "\n\n(Demo mode - using sample video)"
     
-    return f"""
-Found on YouTube!
-- Title: {result['title']}
-- Channel: {result['channel']}
-- URL: {result['url']}
-{source}
-"""
+    # Return only the raw URL (no label, no markdown) so the frontend can
+    # reliably render a thumbnail card in the chat bubble.
+    return f"https://www.youtube.com/watch?v={video_id}{source}"
 
 
 @tool
@@ -234,7 +231,8 @@ Found in catalog!
 - Artist: {artist}
 - Price: ${price}
 
-The customer can purchase this track. Include [PURCHASE_READY: TrackId={track_id}, Name={name}, Price={price}] in your response if they want to buy.
+IMPORTANT: Call check_if_already_purchased(track_id={track_id}) to see if they already own this track before offering to sell it.
+If they don't own it, include [PURCHASE_READY: TrackId={track_id}, Name={name}, Price={price}] in your response.
 """
     
     return f"""

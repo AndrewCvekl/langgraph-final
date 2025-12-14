@@ -125,6 +125,39 @@ def get_my_invoice_lines(invoice_id: int, config: RunnableConfig) -> str:
 
 
 @tool
+def check_if_already_purchased(track_id: int, config: RunnableConfig) -> str:
+    """Check if the customer already owns a specific track.
+    
+    Args:
+        track_id: The TrackId to check.
+        
+    Returns:
+        Whether the customer already owns this track.
+    """
+    customer_id = _get_customer_id(config)
+    db = get_db()
+    
+    result = db.run(
+        f"""
+        SELECT COUNT(*) as owned
+        FROM InvoiceLine
+        JOIN Invoice ON InvoiceLine.InvoiceId = Invoice.InvoiceId
+        WHERE Invoice.CustomerId = {customer_id}
+        AND InvoiceLine.TrackId = {track_id};
+        """
+    )
+    
+    # Check if count > 0 (result contains the count as a number)
+    import re
+    count_match = re.search(r'(\d+)', str(result))
+    count = int(count_match.group(1)) if count_match else 0
+    
+    if count > 0:
+        return f"Yes - customer already owns track {track_id}."
+    return f"No - customer does not own track {track_id}."
+
+
+@tool
 def update_my_email(new_email: str, config: RunnableConfig) -> str:
     """Update the customer's email address.
     

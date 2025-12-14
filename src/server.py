@@ -9,11 +9,18 @@ Provides REST API endpoints for:
 import asyncio
 import json
 import uuid
+import os
 from typing import Any
+
+from dotenv import load_dotenv
+
+# Load environment variables FIRST (before any LangChain imports)
+load_dotenv()
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from langgraph.types import Command
@@ -21,6 +28,10 @@ from langgraph.types import Command
 from src.graph import compile_graph
 from src.state import get_initial_state
 from src.db import initialize_database, DEMO_CUSTOMER_ID
+
+
+# Get the project root directory
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 # Initialize FastAPI app
@@ -258,6 +269,21 @@ async def delete_session(session_id: str):
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "graph_loaded": graph is not None}
+
+
+# Serve static files
+static_dir = os.path.join(PROJECT_ROOT, "static")
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+
+@app.get("/")
+async def serve_ui():
+    """Serve the chat UI."""
+    index_path = os.path.join(PROJECT_ROOT, "static", "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return {"message": "Welcome to Music Store Support Bot API. UI not found, use /docs for API."}
 
 
 if __name__ == "__main__":
