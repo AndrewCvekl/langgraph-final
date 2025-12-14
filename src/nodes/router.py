@@ -1,6 +1,11 @@
 """Router node for intent classification.
 
 Uses structured output to classify user intent into one of the defined routes.
+
+Follows LangGraph "Thinking in LangGraph" design principles:
+- Returns Command with explicit goto destination
+- Type hints declare all possible destinations
+- Handles routing logic internally, not via external routing functions
 """
 
 from typing import Literal
@@ -8,6 +13,7 @@ import re
 
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
+from langgraph.types import Command
 from pydantic import BaseModel, Field
 
 from src.state import SupportState
@@ -98,23 +104,34 @@ def _get_last_user_message(state: SupportState) -> str:
     return ""
 
 
-def router_node(state: SupportState) -> dict:
-    """Classify user intent and set the route.
+def router_node(
+    state: SupportState
+) -> Command[Literal[
+    "catalog_qa",
+    "account_qa",
+    "email_change",
+    "lyrics_qa",
+    "purchase_flow",
+    "__end__"
+]]:
+    """Classify user intent and route to the appropriate agent.
     
     Uses structured output to ensure we get a valid route.
-    Implements proper state-aware routing for flows with pending state.
+    Returns Command with explicit goto destination.
     
     Key routing logic:
     - If user confirms purchase AND we have pending_track_id -> purchase_flow
     - If purchase intent but no pending track -> catalog_qa to find it first
     - Greetings -> catalog_qa (not email_change)
+    - lyrics_flow maps to lyrics_qa node
+    - final maps to __end__
     """
     # Get the last user message for safety checks
     last_user_msg = _get_last_user_message(state)
     has_pending_track = state.get("pending_track_id") is not None
     
     # Build state updates
-    state_updates = {}
+    state_updates: dict = {}
     
     # =========================================================================
     # FAST PATH: If user confirms purchase and we have a pending track,
@@ -123,7 +140,7 @@ def router_node(state: SupportState) -> dict:
     # =========================================================================
     if has_pending_track and PURCHASE_CONFIRM_PATTERNS.match(last_user_msg):
         state_updates["route"] = "purchase_flow"
-        return state_updates
+        return Command(update=state_updates, goto="purchase_flow")
     
     # =========================================================================
     # FAST PATH: If user DECLINES purchase and we have a pending track,
@@ -137,7 +154,7 @@ def router_node(state: SupportState) -> dict:
             "pending_track_name": None,
             "pending_track_price": None,
         })
-        return state_updates
+        return Command(update=state_updates, goto="catalog_qa")
     
     # =========================================================================
     # STANDARD PATH: Use LLM to classify intent
@@ -207,5 +224,19 @@ def router_node(state: SupportState) -> dict:
             "pending_track_price": None,
         })
     
-    return state_updates
+    # =========================================================================
+    # MAP ROUTE TO NODE NAME AND RETURN COMMAND
+    # =========================================================================
+    # Map LLM route names to actual node names
+    route_to_node = {
+        "catalog_qa": "catalog_qa",
+        "account_qa": "account_qa",
+        "email_change": "email_change",
+        "lyrics_flow": "lyrics_qa",  # Map lyrics_flow -> lyrics_qa node
+        "purchase_flow": "purchase_flow",
+        "final": "__end__",
+    }
+    
+    goto_node = route_to_node.get(route, "catalog_qa")
+    return Command(update=state_updates, goto=goto_node)
 

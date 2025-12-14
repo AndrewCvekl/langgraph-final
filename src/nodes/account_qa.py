@@ -2,10 +2,18 @@
 
 Handles questions about profile, invoices, and purchase history.
 Can detect email change intent for handoff.
+
+Follows LangGraph "Thinking in LangGraph" design principles:
+- Returns Command with explicit goto destination
+- Type hints declare all possible destinations
+- Routes to its own tool node (account_tools)
 """
+
+from typing import Literal
 
 from langchain_core.messages import SystemMessage, AIMessage
 from langchain_openai import ChatOpenAI
+from langgraph.types import Command
 
 from src.state import SupportState
 from src.tools.account import (
@@ -40,10 +48,17 @@ ACCOUNT_TOOLS = [
 ]
 
 
-def account_qa_node(state: SupportState) -> dict:
+def account_qa_node(
+    state: SupportState
+) -> Command[Literal["account_tools", "router", "__end__"]]:
     """Handle account-related questions.
     
     Uses customer-scoped tools and may detect email change intent.
+    
+    Returns Command with explicit routing:
+    - account_tools: When LLM wants to call tools
+    - router: When email change intent detected (router sends to email_change)
+    - __end__: When response is complete
     """
     model = ChatOpenAI(model="gpt-4o", temperature=0)
     model_with_tools = model.bind_tools(ACCOUNT_TOOLS)
@@ -56,19 +71,30 @@ def account_qa_node(state: SupportState) -> dict:
     
     response = model_with_tools.invoke(messages, config=config)
     
-    # Check if the model wants to call tools
+    # If the model wants to call tools, route to our dedicated tool node
     if response.tool_calls:
-        return {"messages": [response]}
+        return Command(
+            update={"messages": [response]},
+            goto="account_tools"
+        )
     
     # Check for email change intent
     content = response.content
-    result = {"messages": [response]}
     
     if "[EMAIL_CHANGE_INTENT]" in content:
-        result["route"] = "email_change"
-        # Clean up the message
+        # Clean up the message and route to email_change via router
         clean_content = content.replace("[EMAIL_CHANGE_INTENT]", "").strip()
-        result["messages"] = [AIMessage(content=clean_content)]
+        return Command(
+            update={
+                "messages": [AIMessage(content=clean_content)],
+                "route": "email_change",
+            },
+            goto="router"
+        )
     
-    return result
+    # Normal response - end this turn
+    return Command(
+        update={"messages": [response]},
+        goto="__end__"
+    )
 

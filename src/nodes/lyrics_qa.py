@@ -8,18 +8,18 @@ This node uses an LLM with bound tools to:
 3. Get YouTube video links
 4. Build helpful responses
 
-The LLM decides which tools to call based on the user's query,
-making this a true agentic node that demonstrates LangGraph best practices.
-
-Design Justification:
-- Shows proper LangGraph tool binding and ToolNode patterns
-- LLM orchestrates the flow based on user input
-- Tools are visible in output for observability
-- Consistent with catalog_qa and account_qa patterns
+Follows LangGraph "Thinking in LangGraph" design principles:
+- Returns Command with explicit goto destination
+- Type hints declare all possible destinations
+- Routes to its own tool node (lyrics_tools)
 """
+
+from typing import Literal
+import re
 
 from langchain_core.messages import SystemMessage
 from langchain_openai import ChatOpenAI
+from langgraph.types import Command
 
 from src.state import SupportState
 from src.tools.mocks import genius_search, youtube_lookup, check_song_in_catalog
@@ -73,11 +73,17 @@ LYRICS_TOOLS = [
 ]
 
 
-def lyrics_qa_node(state: SupportState) -> dict:
+def lyrics_qa_node(
+    state: SupportState
+) -> Command[Literal["lyrics_tools", "router", "__end__"]]:
     """Handle lyrics-based song identification using LLM + tools.
     
     The LLM decides which tools to call based on the user's query.
-    This demonstrates proper LangGraph agentic patterns.
+    
+    Returns Command with explicit routing:
+    - lyrics_tools: When LLM wants to call tools
+    - router: When purchase intent detected (router sends to purchase_flow)
+    - __end__: When response is complete
     """
     model = ChatOpenAI(model="gpt-4o", temperature=0)
     model_with_tools = model.bind_tools(LYRICS_TOOLS)
@@ -86,28 +92,43 @@ def lyrics_qa_node(state: SupportState) -> dict:
     
     response = model_with_tools.invoke(messages)
     
-    # Check if the model wants to call tools
+    # If the model wants to call tools, route to our dedicated tool node
     if response.tool_calls:
-        return {"messages": [response]}
+        return Command(
+            update={"messages": [response]},
+            goto="lyrics_tools"
+        )
     
     # Check for purchase intent in the response
     content = response.content
-    result = {"messages": [response]}
     
     # Parse purchase ready tag if present
     if "[PURCHASE_READY:" in content:
-        import re
         match = re.search(
             r'\[PURCHASE_READY:\s*TrackId=(\d+),\s*Name=([^,]+),\s*Price=([^\]]+)\]',
             content
         )
         if match:
-            result["pending_track_id"] = int(match.group(1))
-            result["pending_track_name"] = match.group(2).strip()
             try:
-                result["pending_track_price"] = float(match.group(3).strip().replace("$", ""))
+                price = float(match.group(3).strip().replace("$", ""))
             except ValueError:
-                result["pending_track_price"] = 0.99
+                price = 0.99
+            
+            # Route to router which will send to purchase_flow
+            return Command(
+                update={
+                    "messages": [response],
+                    "pending_track_id": int(match.group(1)),
+                    "pending_track_name": match.group(2).strip(),
+                    "pending_track_price": price,
+                    "route": "purchase_flow",
+                },
+                goto="router"
+            )
     
-    return result
+    # Normal response - end this turn
+    return Command(
+        update={"messages": [response]},
+        goto="__end__"
+    )
 

@@ -2,10 +2,19 @@
 
 Handles questions about genres, artists, albums, and tracks.
 Can detect purchase intent and extract TrackId for handoff.
+
+Follows LangGraph "Thinking in LangGraph" design principles:
+- Returns Command with explicit goto destination
+- Type hints declare all possible destinations
+- Routes to its own tool node (catalog_tools)
 """
+
+from typing import Literal
+import re
 
 from langchain_core.messages import SystemMessage, AIMessage
 from langchain_openai import ChatOpenAI
+from langgraph.types import Command
 
 from src.state import SupportState
 from src.tools.catalog import (
@@ -62,10 +71,17 @@ CATALOG_TOOLS = [
 ]
 
 
-def catalog_qa_node(state: SupportState) -> dict:
+def catalog_qa_node(
+    state: SupportState
+) -> Command[Literal["catalog_tools", "router", "__end__"]]:
     """Handle catalog-related questions.
     
     Uses tools to query the database and may detect purchase intent.
+    
+    Returns Command with explicit routing:
+    - catalog_tools: When LLM wants to call tools
+    - router: When purchase intent detected (router sends to purchase_flow)
+    - __end__: When response is complete
     """
     model = ChatOpenAI(model="gpt-4o", temperature=0)
     model_with_tools = model.bind_tools(CATALOG_TOOLS)
@@ -74,31 +90,43 @@ def catalog_qa_node(state: SupportState) -> dict:
     
     response = model_with_tools.invoke(messages)
     
-    # Check if the model wants to call tools
+    # If the model wants to call tools, route to our dedicated tool node
     if response.tool_calls:
-        return {"messages": [response]}
+        return Command(
+            update={"messages": [response]},
+            goto="catalog_tools"
+        )
     
     # Check for purchase intent in the response
     content = response.content
-    result = {"messages": [response]}
     
     # Parse purchase intent if present
     if "[PURCHASE_INTENT:" in content:
-        import re
         match = re.search(
             r'\[PURCHASE_INTENT:\s*TrackId=(\d+),\s*Name=([^,]+),\s*Price=([^\]]+)\]',
             content
         )
         if match:
-            result["pending_track_id"] = int(match.group(1))
-            result["pending_track_name"] = match.group(2).strip()
             try:
-                result["pending_track_price"] = float(match.group(3).strip().replace("$", ""))
+                price = float(match.group(3).strip().replace("$", ""))
             except ValueError:
-                result["pending_track_price"] = 0.99
-            result["route"] = "purchase_flow"
-            # Keep the message - ensures user always sees something even if purchase_flow
-            # hits an interrupt or encounters issues
+                price = 0.99
+            
+            # Route to router which will send to purchase_flow
+            return Command(
+                update={
+                    "messages": [response],
+                    "pending_track_id": int(match.group(1)),
+                    "pending_track_name": match.group(2).strip(),
+                    "pending_track_price": price,
+                    "route": "purchase_flow",
+                },
+                goto="router"
+            )
     
-    return result
+    # Normal response - end this turn
+    return Command(
+        update={"messages": [response]},
+        goto="__end__"
+    )
 
