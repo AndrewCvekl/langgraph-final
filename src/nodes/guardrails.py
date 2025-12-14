@@ -57,6 +57,7 @@ Your job: decide whether the user's LATEST message is allowed.
   - employer_info
   - other
 - If the request is about their own account, invoices, profile, purchasing music, or catalog browsing, it is allowed.
+- The user may send a number because they are selecting a song/album choice shown earlier. This is allowed; check context.
 
 Return ONLY the structured output."""
 

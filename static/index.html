@@ -1479,7 +1479,14 @@
                                     break;
 
                                 case 'message':
-                                    addMessage('assistant', data.content);
+                                    // Hide internal control tags (e.g. "[PURCHASE_INTENT: ...]") from the chat transcript
+                                    // while still allowing the backend to embed them for orchestration.
+                                    {
+                                        const stripped = stripControlTags(data.content);
+                                        // If the message was *only* a control tag, don't render an empty bubble.
+                                        if (stripped.removed && !stripped.text) break;
+                                        addMessage('assistant', stripped.text || data.content);
+                                    }
                                     break;
 
                                 case 'interrupt':
@@ -1530,6 +1537,38 @@
             messagesContainer.appendChild(messageEl);
             scrollToBottom();
             return messageEl;
+        }
+
+        // Remove internal "control tokens" from assistant-facing display text.
+        // Examples:
+        // - [PURCHASE_INTENT: TrackId=989, Name=In Your Honor, Price=0.99]
+        // - [PURCHASE_READY: TrackId=989, Name=In Your Honor, Price=0.99]
+        function stripControlTags(text) {
+            const input = String(text ?? '');
+            let out = input;
+            let removed = false;
+
+            const patterns = [
+                // Purchase flow control tokens
+                /\[(?:PURCHASE_INTENT|PURCHASE_READY)\s*:\s*[^\]]*\]/gi,
+            ];
+
+            for (const re of patterns) {
+                if (re.test(out)) {
+                    removed = true;
+                    out = out.replace(re, '');
+                }
+            }
+
+            // Tidy up whitespace left behind by tag removal
+            out = out
+                .replace(/\r\n/g, '\n')
+                .replace(/[ \t]+\n/g, '\n')
+                .replace(/\n[ \t]+/g, '\n')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+
+            return { text: out, removed };
         }
 
         function addTypingIndicator() {
@@ -2231,7 +2270,8 @@
             const ytMatch = ytMdMatch ? null : raw.match(ytRegex);
             const mp4Match = raw.match(mp4Regex);
 
-            let remaining = raw;
+            // Strip internal control tags before any rendering/parsing.
+            let remaining = stripControlTags(raw).text;
 
             if (ytMdMatch) {
                 const url = ytMdMatch[2];
