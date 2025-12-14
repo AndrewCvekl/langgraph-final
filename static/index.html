@@ -1796,6 +1796,10 @@
             // Pattern 2: Purchase history with Invoice ID, Date, Total
             // Example: "1. **Invoice ID:** 415 - **Date:** 2025-12-13 - **Total:** $0.99"
             const purchaseHistoryPattern = /(\d+)\.\s+\*\*Invoice ID:\*\*\s*(\d+)\s*-\s*\*\*Date:\*\*\s*([\d-]+)\s*-\s*\*\*Total:\*\*\s*\$?([\d.]+)/g;
+
+            // Pattern 2b: Purchase history (plain, comma-separated)
+            // Example: "1. Invoice ID: 417, Date: 2025-12-14, Total: $0.99"
+            const purchaseHistoryPlainPattern = /(\d+)\.\s*Invoice ID:\s*(\d+)\s*,\s*Date:\s*([\d-]+)\s*,\s*Total:\s*\$?([\d.]+)/g;
             
             // Pattern 3: Invoice details with Track Name, Artist, Album, Unit Price, Quantity
             // Example: "- **Track Name:** Song - **Artist:** Artist - **Album:** Album - **Unit Price:** $0.99 - **Quantity:** 1"
@@ -1812,6 +1816,12 @@
             // Pattern 6: Profile information (bulleted key-value pairs)
             // Example: "- **Name:** Luís Gonçalves"
             const profilePattern = /-\s*\*\*([^:]+?):\*\*\s*([^\n]+)/g;
+
+            // Pattern 6b: Generic key/value bullets (non-bold)
+            // Examples:
+            // - Name: Luís Gonçalves
+            // - Track Name: "OAM's Blues"
+            const kvBulletPattern = /-\s*([^:]+?):\s*([^\n]+)/g;
             
             // Pattern 7: Simple numbered lists (plain text, no bold)
             // Example: "1. Alternative" or "1. Apocalyptica"
@@ -1853,8 +1863,24 @@
                         remaining = remaining.replace(match[0], '');
                     });
                 }
-                // Try invoice details pattern
+                // Try purchase history (plain) pattern
                 else {
+                    const purchasePlainMatches = Array.from(content.matchAll(purchaseHistoryPlainPattern));
+                    if (purchasePlainMatches.length >= 2) {
+                        tableData = purchasePlainMatches.map(match => ({
+                            number: match[1],
+                            invoiceId: match[2],
+                            date: match[3],
+                            total: `$${match[4]}`
+                        }));
+                        tableType = 'purchase-history';
+                        purchasePlainMatches.forEach(match => {
+                            remaining = remaining.replace(match[0], '');
+                        });
+                    }
+                }
+                // Try invoice details pattern
+                if (!tableData) {
                     const invoiceMatches = Array.from(content.matchAll(invoiceDetailsPattern));
                     if (invoiceMatches.length > 0) {
                         tableData = invoiceMatches.map(match => ({
@@ -1912,6 +1938,21 @@
                                     }));
                                     tableType = 'profile';
                                     profileMatches.forEach(match => {
+                                        remaining = remaining.replace(match[0], '');
+                                    });
+                                }
+                            }
+                            // Try generic key/value bullets (non-bold)
+                            if (!tableData) {
+                                const kvMatches = Array.from(content.matchAll(kvBulletPattern));
+                                // Only consider this if we have multiple key/value bullets and it doesn't look like a list of sentences
+                                if (kvMatches.length >= 2) {
+                                    tableData = kvMatches.map(match => ({
+                                        label: match[1].trim(),
+                                        value: match[2].trim().replace(/^"|"$/g, '')
+                                    }));
+                                    tableType = 'profile';
+                                    kvMatches.forEach(match => {
                                         remaining = remaining.replace(match[0], '');
                                     });
                                 }
