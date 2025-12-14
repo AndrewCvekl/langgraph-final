@@ -18,12 +18,51 @@ Design Justification:
 - Consistent with catalog_qa and account_qa patterns
 """
 
-from langchain_core.messages import SystemMessage
+import json
+import re
+
+from langchain_core.messages import SystemMessage, AIMessage
 from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, Field
 
 from src.state import SupportState
 from src.tools.mocks import genius_search, youtube_lookup, check_song_in_catalog
 from src.tools.account import check_if_already_purchased
+
+
+class PurchaseHandoff(BaseModel):
+    """Structured purchase handoff payload (control signal)."""
+
+    track_id: int = Field(..., description="TrackId to purchase")
+    name: str = Field(..., description="Track name for display")
+    price: float = Field(..., description="Unit price in dollars")
+
+
+class LyricsResponse(BaseModel):
+    """Structured response for the lyrics lane."""
+
+    message: str = Field(..., description="User-facing assistant response")
+    purchase: PurchaseHandoff | None = Field(
+        default=None,
+        description="If set, populates pending_track_* for follow-on purchase confirmation.",
+    )
+
+
+def _strip_code_fences(text: str) -> str:
+    text = (text or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    return text.strip()
+
+
+def _parse_structured_lyrics_response(raw: str) -> LyricsResponse | None:
+    try:
+        cleaned = _strip_code_fences(raw)
+        data = json.loads(cleaned)
+        return LyricsResponse.model_validate(data)
+    except Exception:
+        return None
 
 
 LYRICS_SYSTEM_PROMPT = """You are a helpful music assistant specializing in identifying songs from lyrics.
@@ -47,7 +86,7 @@ When a user provides lyrics or asks about a song:
 
 - If they ALREADY OWN the track: Let them know it's in their library! No purchase prompt needed.
 - If the song IS in our catalog (and they don't own it): Show the track details and ask if they'd like to purchase
-  - Include [PURCHASE_READY: TrackId=X, Name=Y, Price=Z] at the end so the system can set up the purchase
+  - If they want to buy it, include a purchase handoff in the JSON output ("purchase" with track_id/name/price)
 - If the song is NOT in our catalog: Show the YouTube link and ask if they'd like us to note their interest
 - When including YouTube: output the **raw YouTube URL on its own line** (e.g. https://www.youtube.com/watch?v=VIDEO_ID). Do NOT use markdown link syntax like [Watch on YouTube](...).
 - Always be helpful and conversational
@@ -62,6 +101,26 @@ User: "What song goes like back in black I hit the sack"
 6. Respond based on whether they own it or not!
 
 Be enthusiastic about helping users discover and enjoy music!"""
+
+
+# NOTE: We keep the legacy [PURCHASE_READY: ...] convention for backwards
+# compatibility, but we now prefer structured control signals. When you are
+# ready to respond to the user (no tool calls), output ONLY valid JSON:
+#
+# {
+#   "message": "<user-facing text (may include raw YouTube URL)>",
+#   "purchase": null | {"track_id": <int>, "name": "<str>", "price": <float>}
+# }
+LYRICS_SYSTEM_PROMPT += """
+
+## Output Format (Preferred)
+When you are ready to respond to the user (no tool calls), output ONLY valid JSON:
+{
+  "message": "string",
+  "purchase": null or { "track_id": 123, "name": "Track Name", "price": 0.99 }
+}
+Do not wrap in markdown fences. Do not include any extra keys.
+"""
 
 
 # Tools available to the lyrics QA node
@@ -90,13 +149,20 @@ def lyrics_qa_node(state: SupportState) -> dict:
     if response.tool_calls:
         return {"messages": [response]}
     
-    # Check for purchase intent in the response
+    # Preferred: structured JSON control signal
+    structured = _parse_structured_lyrics_response(response.content)
+    if structured is not None:
+        result: dict = {"messages": [AIMessage(content=structured.message)]}
+        if structured.purchase is not None:
+            result["pending_track_id"] = structured.purchase.track_id
+            result["pending_track_name"] = structured.purchase.name.strip()
+            result["pending_track_price"] = float(structured.purchase.price)
+        return result
+
+    # Fallback: legacy tag parsing
     content = response.content
     result = {"messages": [response]}
-    
-    # Parse purchase ready tag if present
     if "[PURCHASE_READY:" in content:
-        import re
         match = re.search(
             r'\[PURCHASE_READY:\s*TrackId=(\d+),\s*Name=([^,]+),\s*Price=([^\]]+)\]',
             content
@@ -108,6 +174,6 @@ def lyrics_qa_node(state: SupportState) -> dict:
                 result["pending_track_price"] = float(match.group(3).strip().replace("$", ""))
             except ValueError:
                 result["pending_track_price"] = 0.99
-    
+
     return result
 
