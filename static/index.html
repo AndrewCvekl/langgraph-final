@@ -1088,19 +1088,23 @@
             color: white;
         }
 
-        /* Beautiful green tables for ordered lists */
+        /* Beautiful styled tables for data display */
         .message-table {
             margin: 1rem 0;
             width: 100%;
-            border-collapse: collapse;
-            border-radius: 0.625rem;
+            border-collapse: separate;
+            border-spacing: 0;
+            border-radius: 0.75rem;
             overflow: hidden;
-            box-shadow: 0 2px 8px color-mix(in oklab, var(--teal-500) 15%, transparent);
+            box-shadow: 
+                0 1px 3px rgba(0, 0, 0, 0.08),
+                0 4px 12px color-mix(in oklab, var(--teal-500) 12%, transparent);
             background: white;
+            border: 1px solid var(--teal-200);
         }
 
         .message-table thead {
-            background: linear-gradient(135deg, var(--teal-600), var(--teal-700));
+            background: linear-gradient(135deg, var(--teal-600) 0%, var(--teal-700) 100%);
             color: white;
         }
 
@@ -1108,42 +1112,57 @@
             padding: 0.875rem 1rem;
             text-align: left;
             font-weight: 600;
-            font-size: 0.875rem;
+            font-size: 0.75rem;
             text-transform: uppercase;
-            letter-spacing: 0.025em;
+            letter-spacing: 0.05em;
+            white-space: nowrap;
+            border-bottom: 2px solid var(--teal-800);
         }
 
         .message-table thead th:first-child {
             padding-left: 1.25rem;
+            border-top-left-radius: 0.625rem;
         }
 
         .message-table thead th:last-child {
             padding-right: 1.25rem;
+            border-top-right-radius: 0.625rem;
         }
 
         .message-table tbody tr {
-            border-bottom: 1px solid var(--teal-200);
+            border-bottom: 1px solid var(--gray-200);
             transition: background-color 0.15s ease;
+        }
+
+        .message-table tbody tr:nth-child(even) {
+            background: var(--gray-50);
         }
 
         .message-table tbody tr:last-child {
             border-bottom: none;
         }
 
+        .message-table tbody tr:last-child td:first-child {
+            border-bottom-left-radius: 0.625rem;
+        }
+
+        .message-table tbody tr:last-child td:last-child {
+            border-bottom-right-radius: 0.625rem;
+        }
+
         .message-table tbody tr:hover {
-            background: var(--teal-50);
+            background: color-mix(in oklab, var(--teal-50) 60%, white);
         }
 
         .message-table tbody td {
-            padding: 0.875rem 1rem;
+            padding: 0.75rem 1rem;
             color: var(--gray-700);
             font-size: 0.9375rem;
+            vertical-align: middle;
         }
 
         .message-table tbody td:first-child {
             padding-left: 1.25rem;
-            font-weight: 500;
-            color: var(--gray-900);
         }
 
         .message-table tbody td:last-child {
@@ -1155,26 +1174,73 @@
             font-weight: 600;
         }
 
+        /* Column-specific styling */
         .message-table .table-number {
             color: var(--teal-700);
-            font-weight: 600;
+            font-weight: 700;
+            font-size: 0.875rem;
             min-width: 2rem;
+            text-align: center;
         }
 
         .message-table .table-price {
             color: var(--teal-700);
-            font-weight: 600;
+            font-weight: 700;
+            font-size: 0.9375rem;
+            white-space: nowrap;
         }
 
         .message-table .table-date {
-            color: var(--gray-600);
+            color: var(--gray-500);
             font-size: 0.875rem;
+            white-space: nowrap;
+        }
+
+        .message-table .table-duration {
+            color: var(--gray-500);
+            font-size: 0.875rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+            white-space: nowrap;
         }
 
         .message-table .table-id {
-            color: var(--teal-700);
+            color: var(--teal-600);
             font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+            font-size: 0.8125rem;
+            font-weight: 500;
+            background: var(--teal-50);
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            display: inline-block;
+        }
+
+        .message-table .table-label {
+            color: var(--gray-600);
             font-size: 0.875rem;
+            text-transform: capitalize;
+            min-width: 100px;
+        }
+
+        /* Responsive table adjustments */
+        @media (max-width: 640px) {
+            .message-table {
+                font-size: 0.875rem;
+            }
+            
+            .message-table thead th,
+            .message-table tbody td {
+                padding: 0.625rem 0.75rem;
+            }
+            
+            .message-table thead th:first-child,
+            .message-table tbody td:first-child {
+                padding-left: 0.875rem;
+            }
+            
+            .message-table thead th:last-child,
+            .message-table tbody td:last-child {
+                padding-right: 0.875rem;
+            }
         }
     </style>
 </head>
@@ -1784,380 +1850,879 @@
             return div.innerHTML;
         }
 
+        /**
+         * Unified Data Parser - Detects and extracts structured data from LLM responses
+         * Uses a priority-based detection system with flexible pattern matching
+         */
         function parseListToTable(content) {
-            // Detect ordered lists with structured data
-            // Pattern: numbered items with key-value pairs or structured data
+            if (!content || typeof content !== 'string') {
+                return { tableData: null, tableType: null, remaining: content || '' };
+            }
 
-            // First: detect "track blocks" where a numbered track name is followed by
-            // bullet key/value lines (TrackId/Duration/Price). This is the exact case
-            // where the UI previously turned names into an "Album Name" table and
-            // left the bullet details behind.
-            function parseTrackBlocks(input) {
-                const lines = String(input ?? '').replace(/\r\n/g, '\n').split('\n');
-                const kept = [];
+            const raw = content.replace(/\r\n/g, '\n');
+            
+            // Helper: extract price value, normalizing format
+            const normalizePrice = (val) => {
+                if (!val) return '';
+                const num = String(val).replace(/[^0-9.]/g, '');
+                return num ? `$${parseFloat(num).toFixed(2)}` : '';
+            };
+
+            // Helper: format duration from various formats (seconds, mm:ss, etc.)
+            const normalizeDuration = (val) => {
+                if (!val) return '';
+                const str = String(val).trim();
+                // If already in mm:ss format
+                if (/^\d+:\d{2}$/.test(str)) return str;
+                // If in seconds, convert
+                const secs = parseInt(str, 10);
+                if (!isNaN(secs)) {
+                    const mins = Math.floor(secs / 60);
+                    const remainSecs = secs % 60;
+                    return `${mins}:${remainSecs.toString().padStart(2, '0')}`;
+                }
+                return str;
+            };
+
+            // Helper: clean markdown bold from text
+            const cleanBold = (text) => String(text || '').replace(/\*\*/g, '').trim();
+
+            // ========== DETECTION STRATEGIES (ordered by specificity) ==========
+
+            // Strategy 1: Track blocks with bullet details
+            // Format:
+            // 1. **Track Name**
+            //    - TrackId: 123
+            //    - Duration: 234
+            //    - Price: $0.99
+            function detectTrackBlocks() {
+                const lines = raw.split('\n');
                 const rows = [];
-
-                const isNumbered = (line) => /^\s*\d+\.\s+/.test(line);
-                const parseNumberedName = (line) => {
-                    const m = line.match(/^\s*(\d+)\.\s+(.+?)\s*$/);
-                    if (!m) return null;
-                    const number = m[1];
-                    let name = m[2].trim();
-                    // Strip markdown bold wrappers if present
-                    name = name.replace(/^\*\*(.+?)\*\*$/, '$1').trim();
-                    return { number, name };
-                };
-
+                const kept = [];
                 let i = 0;
+
                 while (i < lines.length) {
                     const line = lines[i];
-                    const header = parseNumberedName(line);
-                    if (!header) {
+                    const headerMatch = line.match(/^\s*(\d+)\.\s+\*?\*?(.+?)\*?\*?\s*$/);
+                    
+                    if (!headerMatch) {
                         kept.push(line);
-                        i += 1;
+                        i++;
                         continue;
                     }
 
-                    // Look ahead for bullet details belonging to this numbered item.
-                    // Accept optional blank lines between the header and bullets.
+                    const number = headerMatch[1];
+                    const name = cleanBold(headerMatch[2]);
+                    
+                    // Look for bullet details
                     let j = i + 1;
-                    while (j < lines.length && lines[j].trim() === '') j += 1;
-
+                    while (j < lines.length && lines[j].trim() === '') j++;
+                    
                     const details = {};
-                    let consumedAnyDetail = false;
+                    let foundDetails = false;
 
                     while (j < lines.length) {
-                        const l = lines[j];
-                        if (isNumbered(l)) break; // next item
-                        // Only treat bullet-ish lines as detail lines; otherwise stop.
-                        const bullet = l.match(/^\s*-\s*([^:]+)\s*:\s*(.+?)\s*$/);
-                        if (!bullet) break;
+                        const bulletLine = lines[j];
+                        if (/^\s*\d+\./.test(bulletLine)) break; // Next numbered item
+                        
+                        const bulletMatch = bulletLine.match(/^\s*[-•]\s*\*?\*?([^:*]+)\*?\*?\s*:\s*(.+?)\s*$/);
+                        if (!bulletMatch) {
+                            if (bulletLine.trim() !== '') break;
+                            j++;
+                            continue;
+                        }
 
-                        consumedAnyDetail = true;
-                        const rawKey = bullet[1].trim().toLowerCase();
-                        const value = bullet[2].trim();
+                        foundDetails = true;
+                        const key = bulletMatch[1].trim().toLowerCase().replace(/\s+/g, '');
+                        const value = cleanBold(bulletMatch[2]);
 
-                        if (rawKey === 'trackid' || rawKey === 'track id') details.trackId = value;
-                        else if (rawKey === 'duration') details.duration = value;
-                        else if (rawKey === 'price') details.price = value.startsWith('$') ? value : `$${value}`;
-                        else details[rawKey] = value;
+                        if (key === 'trackid' || key === 'id') details.trackId = value;
+                        else if (key === 'duration' || key === 'length') details.duration = normalizeDuration(value);
+                        else if (key === 'price' || key === 'unitprice') details.price = normalizePrice(value);
+                        else if (key === 'artist') details.artist = value;
+                        else if (key === 'album') details.album = value;
+                        else if (key === 'genre') details.genre = value;
 
-                        j += 1;
-                        // Allow blank line(s) inside a block
-                        while (j < lines.length && lines[j].trim() === '') j += 1;
+                        j++;
+                        while (j < lines.length && lines[j].trim() === '') j++;
                     }
 
-                    // If we captured any real track fields, emit a row and consume the block.
-                    const hasTrackFields = Boolean(details.trackId || details.price || details.duration);
-                    if (consumedAnyDetail && hasTrackFields) {
-                        rows.push({
-                            number: header.number,
-                            name: header.name,
-                            trackId: details.trackId || '',
-                            duration: details.duration || '',
-                            price: details.price || '',
-                        });
-                        // Consume header + bullet lines; do not keep them.
+                    if (foundDetails && (details.trackId || details.price)) {
+                        rows.push({ number, name, ...details });
                         i = j;
-                        continue;
+                    } else {
+                        kept.push(line);
+                        i++;
                     }
-
-                    // Not a track block; keep the header line and continue (don't eat following lines).
-                    kept.push(line);
-                    i += 1;
                 }
 
-                return { rows, remaining: kept.join('\n').trim() };
-            }
-            
-            // Pattern 1: Song lists with TrackId and Price
-            // Example: "1. **Song Name** - TrackId: 123, Price: $0.99"
-            // Also handles: "1.  **Song Name** - TrackId: 123, Price: $0.99" (extra spaces)
-            const songListPattern = /(\d+)\.\s+\*\*([^*]+?)\*\*\s*-\s*TrackId:\s*(\d+),\s*Price:\s*\$?([\d.]+)/g;
-            
-            // Pattern 2: Purchase history with Invoice ID, Date, Total
-            // Example: "1. **Invoice ID:** 415 - **Date:** 2025-12-13 - **Total:** $0.99"
-            const purchaseHistoryPattern = /(\d+)\.\s+\*\*Invoice ID:\*\*\s*(\d+)\s*-\s*\*\*Date:\*\*\s*([\d-]+)\s*-\s*\*\*Total:\*\*\s*\$?([\d.]+)/g;
-            
-            // Pattern 3: Invoice details with Track Name, Artist, Album, Unit Price, Quantity
-            // Example: "- **Track Name:** Song - **Artist:** Artist - **Album:** Album - **Unit Price:** $0.99 - **Quantity:** 1"
-            const invoiceDetailsPattern = /-\s*\*\*Track Name:\*\*\s*([^-]+?)\s*-\s*\*\*Artist:\*\*\s*([^-]+?)\s*-\s*\*\*Album:\*\*\s*([^-]+?)\s*-\s*\*\*Unit Price:\*\*\s*\$?([\d.]+)\s*-\s*\*\*Quantity:\*\*\s*(\d+)/g;
-            
-            // Pattern 4: Purchase complete details
-            // Example: "- Invoice ID: 415 - Track: Track 7 - Amount: $0.99 - Date: 2025-12-13 18:59:38"
-            const purchaseCompletePattern = /-\s*Invoice ID:\s*(\d+)\s*-\s*Track:\s*([^-]+?)\s*-\s*Amount:\s*\$?([\d.]+)\s*-\s*Date:\s*([^\n]+)/g;
-            
-            // Pattern 5: Simple album lists (numbered with just bold text)
-            // Example: "1. **For Those About To Rock We Salute You**"
-            const albumListPattern = /(\d+)\.\s+\*\*([^*]+?)\*\*/g;
-            
-            // Pattern 6: Profile information (bulleted key-value pairs)
-            // Example: "- **Name:** Luís Gonçalves"
-            const profilePattern = /-\s*\*\*([^:]+?):\*\*\s*([^\n]+)/g;
-            
-            // Pattern 7: Simple numbered lists (plain text, no bold)
-            // Example: "1. Alternative" or "1. Apocalyptica"
-            const simpleListPattern = /^(\d+)\.\s+(.+)$/gm;
-            
-            let tableData = null;
-            let tableType = null;
-            let remaining = content;
-
-            // Try to match track blocks (name + bullet details) first
-            const trackBlock = parseTrackBlocks(content);
-            if (trackBlock.rows.length >= 1) {
-                tableData = trackBlock.rows;
-                tableType = 'songs';
-                remaining = trackBlock.remaining;
-                return { tableData, tableType, remaining: remaining.trim() };
-            }
-            
-            // Try to match song list pattern
-            const songMatches = Array.from(content.matchAll(songListPattern));
-            if (songMatches.length >= 1) {
-                tableData = songMatches.map(match => ({
-                    number: match[1],
-                    name: match[2].trim(),
-                    trackId: match[3],
-                    duration: '',
-                    price: `$${match[4]}`
-                }));
-                tableType = 'songs';
-                // Remove matched content and album headers
-                songMatches.forEach(match => {
-                    remaining = remaining.replace(match[0], '');
-                });
-                // Remove album headers that might be between matches
-                remaining = remaining.replace(/\*\*Album:[^*]+\*\*/g, '').trim();
-            }
-            // Try purchase history pattern
-            else {
-                const purchaseMatches = Array.from(content.matchAll(purchaseHistoryPattern));
-                if (purchaseMatches.length >= 2) {
-                    tableData = purchaseMatches.map(match => ({
-                        number: match[1],
-                        invoiceId: match[2],
-                        date: match[3],
-                        total: `$${match[4]}`
-                    }));
-                    tableType = 'purchase-history';
-                    purchaseMatches.forEach(match => {
-                        remaining = remaining.replace(match[0], '');
-                    });
+                if (rows.length > 0) {
+                    return { tableData: rows, tableType: 'tracks', remaining: kept.join('\n').trim() };
                 }
-                // Try invoice details pattern
-                else {
-                    const invoiceMatches = Array.from(content.matchAll(invoiceDetailsPattern));
-                    if (invoiceMatches.length > 0) {
-                        tableData = invoiceMatches.map(match => ({
-                            trackName: match[1].trim(),
-                            artist: match[2].trim(),
-                            album: match[3].trim(),
-                            unitPrice: `$${match[4]}`,
-                            quantity: match[5]
-                        }));
-                        tableType = 'invoice-details';
-                        invoiceMatches.forEach(match => {
-                            remaining = remaining.replace(match[0], '');
+                return null;
+            }
+
+            // Strategy 2: Inline track format
+            // Format: "1. **Song Name** - TrackId: 123, Price: $0.99" or variations
+            function detectInlineTracks() {
+                const patterns = [
+                    // "1. **Song** - TrackId: 123, Price: $0.99"
+                    /(\d+)\.\s+\*\*([^*]+)\*\*\s*[-–]\s*TrackId:\s*(\d+)(?:,\s*Price:\s*\$?([\d.]+))?/gi,
+                    // "1. Song Name (TrackId: 123, $0.99)"
+                    /(\d+)\.\s+([^(\n]+?)\s*\(TrackId:\s*(\d+)(?:,?\s*\$?([\d.]+))?\)/gi,
+                    // "- **Track:** Song **ID:** 123 **Price:** $0.99"
+                    /[-•]\s*\*\*Track:\*\*\s*([^*\n]+?)(?:\s*\*\*(?:Track\s*)?ID:\*\*\s*(\d+))?(?:\s*\*\*Price:\*\*\s*\$?([\d.]+))?/gi,
+                ];
+
+                for (const pattern of patterns) {
+                    const matches = Array.from(raw.matchAll(pattern));
+                    if (matches.length >= 1) {
+                        let remaining = raw;
+                        const rows = matches.map((m, idx) => {
+                            remaining = remaining.replace(m[0], '');
+                            return {
+                                number: m[1] || String(idx + 1),
+                                name: cleanBold(m[2] || m[1]),
+                                trackId: m[3] || m[2] || '',
+                                price: normalizePrice(m[4] || m[3])
+                            };
                         });
-                    }
-                    // Try purchase complete pattern
-                    else {
-                        const purchaseCompleteMatches = Array.from(content.matchAll(purchaseCompletePattern));
-                        if (purchaseCompleteMatches.length > 0) {
-                            tableData = purchaseCompleteMatches.map(match => ({
-                                invoiceId: match[1],
-                                track: match[2].trim(),
-                                amount: `$${match[3]}`,
-                                date: match[4].trim()
-                            }));
-                            tableType = 'purchase-complete';
-                            purchaseCompleteMatches.forEach(match => {
-                                remaining = remaining.replace(match[0], '');
-                            });
-                        }
-                        // Try album list pattern (simple numbered list with bold text)
-                        else {
-                            const albumMatches = Array.from(content.matchAll(albumListPattern));
-                            // Only match if it's a simple list (no TrackId/Price) and has at least 2 items
-                            if (albumMatches.length >= 2) {
-                                // Check if any match has TrackId/Price to avoid false positives
-                                const hasComplexData = albumMatches.some(m => m[0].includes('TrackId') || m[0].includes('Price'));
-                                if (!hasComplexData) {
-                                    // Infer whether this is an album list or a track list from nearby text.
-                                    // If the surrounding text says "track(s)", render as tracks.
-                                    const firstIdx = typeof albumMatches[0].index === 'number' ? albumMatches[0].index : 0;
-                                    const preamble = content.slice(Math.max(0, firstIdx - 220), firstIdx).toLowerCase();
-                                    const looksLikeTracks = /\btracks?\b/.test(preamble) && !/\balbums?\b/.test(preamble);
-                                    tableData = albumMatches.map(match => ({
-                                        number: match[1],
-                                        name: match[2].trim()
-                                    }));
-                                    tableType = looksLikeTracks ? 'tracks-simple' : 'albums';
-                                    albumMatches.forEach(match => {
-                                        remaining = remaining.replace(match[0], '');
-                                    });
-                                }
-                            }
-                            // Try profile information pattern
-                            if (!tableData) {
-                                const profileMatches = Array.from(content.matchAll(profilePattern));
-                                if (profileMatches.length >= 2) {
-                                    tableData = profileMatches.map(match => ({
-                                        label: match[1].trim(),
-                                        value: match[2].trim()
-                                    }));
-                                    tableType = 'profile';
-                                    profileMatches.forEach(match => {
-                                        remaining = remaining.replace(match[0], '');
-                                    });
-                                }
-                            }
-                            // Try simple numbered list pattern (genres, artists, etc.)
-                            if (!tableData) {
-                                const simpleMatches = Array.from(content.matchAll(simpleListPattern));
-                                // Only match if we have at least 2 items and they're not already matched by other patterns
-                                if (simpleMatches.length >= 2) {
-                                    // Check if any match has bold text or structured data to avoid false positives
-                                    const hasBoldOrStructured = simpleMatches.some(m => 
-                                        m[0].includes('**') || 
-                                        m[0].includes('TrackId') || 
-                                        m[0].includes('Price') ||
-                                        m[0].includes('Invoice') ||
-                                        m[0].includes('Date:')
-                                    );
-                                    if (!hasBoldOrStructured) {
-                                        tableData = simpleMatches.map(match => ({
-                                            number: match[1],
-                                            name: match[2].trim()
-                                        }));
-                                        tableType = 'simple-list';
-                                        simpleMatches.forEach(match => {
-                                            remaining = remaining.replace(match[0], '');
-                                        });
-                                    }
-                                }
-                            }
-                        }
+                        return { tableData: rows, tableType: 'tracks', remaining: remaining.trim() };
                     }
                 }
+                return null;
             }
-            
-            return { tableData, tableType, remaining: remaining.trim() };
+
+            // Strategy 3: Purchase history / Invoices
+            // Handles many LLM output formats for invoice data
+            function detectPurchaseHistory() {
+                // Helper to normalize date format
+                const normalizeDate = (dateStr) => {
+                    if (!dateStr) return '';
+                    // Remove time portion if present (e.g., "2025-08-07 00:00:00" -> "2025-08-07")
+                    return String(dateStr).replace(/\s+\d{2}:\d{2}:\d{2}/, '').trim();
+                };
+
+                // Strategy 3a: Split format - Invoice IDs listed separately from Date/Total
+                // Handles format like:
+                // Invoice ID    382
+                // Billing Address    ...
+                // ...
+                // 1.
+                //    - **Date:** 2025-08-07
+                //    - **Total:** $8.91
+                function detectSplitInvoiceFormat() {
+                    // First, extract Invoice IDs from the header section
+                    const invoiceIdPattern = /(?:Invoice\s*ID|InvoiceId)[:\s\t]+(\d+)/gi;
+                    const invoiceIds = Array.from(raw.matchAll(invoiceIdPattern)).map(m => m[1]);
+                    
+                    if (invoiceIds.length === 0) return null;
+
+                    // Now look for numbered items with Date/Total bullets
+                    const lines = raw.split('\n');
+                    const dateItems = [];
+                    let i = 0;
+
+                    while (i < lines.length) {
+                        const line = lines[i];
+                        // Match empty numbered item: "1." or "1. " (with nothing after)
+                        const emptyNumMatch = line.match(/^\s*(\d+)\.\s*$/);
+                        
+                        if (!emptyNumMatch) {
+                            i++;
+                            continue;
+                        }
+
+                        const itemNumber = parseInt(emptyNumMatch[1], 10);
+                        
+                        // Look for bullet details
+                        let j = i + 1;
+                        while (j < lines.length && lines[j].trim() === '') j++;
+                        
+                        const details = {};
+                        let foundDetails = false;
+
+                        while (j < lines.length) {
+                            const bulletLine = lines[j];
+                            if (/^\s*\d+\.\s*$/.test(bulletLine)) break; // Next numbered item
+                            
+                            const bulletMatch = bulletLine.match(/^\s*[-•]\s*\*?\*?([^:*]+)\*?\*?\s*:\s*(.+?)\s*$/);
+                            if (!bulletMatch) {
+                                if (bulletLine.trim() !== '' && !/^\s*$/.test(bulletLine)) break;
+                                j++;
+                                continue;
+                            }
+
+                            foundDetails = true;
+                            const key = bulletMatch[1].trim().toLowerCase().replace(/\s+/g, '');
+                            const value = cleanBold(bulletMatch[2]);
+
+                            if (key === 'date' || key === 'invoicedate') details.date = normalizeDate(value);
+                            else if (key === 'total' || key === 'amount') details.total = normalizePrice(value);
+
+                            j++;
+                        }
+
+                        if (foundDetails && (details.date || details.total)) {
+                            dateItems.push({ itemNumber, ...details });
+                        }
+                        i = j;
+                    }
+
+                    // Combine Invoice IDs with Date/Total items
+                    if (dateItems.length > 0 && invoiceIds.length >= dateItems.length) {
+                        const rows = dateItems.map((item, idx) => ({
+                            number: String(item.itemNumber),
+                            invoiceId: invoiceIds[idx] || '',
+                            date: item.date || '',
+                            total: item.total || ''
+                        }));
+
+                        // Remove the matched content
+                        let remaining = raw;
+                        // Remove Invoice ID lines
+                        remaining = remaining.replace(/(?:Invoice\s*ID|InvoiceId)[:\s\t]+\d+[^\n]*/gi, '');
+                        // Remove Billing Address lines
+                        remaining = remaining.replace(/Billing\s*Address[:\s\t]+[^\n]*/gi, '');
+                        // Remove the numbered items with bullets
+                        remaining = remaining.replace(/\d+\.\s*\n(?:\s*[-•]\s*\*?\*?[^:*]+\*?\*?\s*:\s*.+?\s*\n?)+/g, '');
+                        remaining = remaining.replace(/\n{3,}/g, '\n\n').trim();
+                        
+                        return { tableData: rows, tableType: 'invoices', remaining };
+                    }
+                    return null;
+                }
+
+                // Strategy 3b: Block format - numbered items with invoice ID and bullet sub-details
+                // 1. **Invoice 382**
+                //    - Date: 2025-08-07
+                //    - Total: $8.91
+                function detectInvoiceBlocks() {
+                    const lines = raw.split('\n');
+                    const rows = [];
+                    const kept = [];
+                    let i = 0;
+
+                    while (i < lines.length) {
+                        const line = lines[i];
+                        // Match multiple formats:
+                        // "1. **Invoice 382**" or "1. **Invoice ID:** 382" or "1. Invoice #382" or "1. Invoice ID: 382"
+                        const headerMatch = line.match(/^\s*(\d+)\.\s+(?:\*\*)?Invoice\s*(?:#|ID)?(?::\*\*|:)?\s*(\d+)(?:\*\*)?\s*$/i);
+                        
+                        if (!headerMatch) {
+                            kept.push(line);
+                            i++;
+                            continue;
+                        }
+
+                        const number = headerMatch[1];
+                        const invoiceId = headerMatch[2];
+                        
+                        // Look for bullet details
+                        let j = i + 1;
+                        while (j < lines.length && lines[j].trim() === '') j++;
+                        
+                        const details = { invoiceId };
+                        let foundDetails = false;
+
+                        while (j < lines.length) {
+                            const bulletLine = lines[j];
+                            if (/^\s*\d+\./.test(bulletLine)) break;
+                            
+                            const bulletMatch = bulletLine.match(/^\s*[-•]\s*\*?\*?([^:*]+)\*?\*?\s*:\s*(.+?)\s*$/);
+                            if (!bulletMatch) {
+                                if (bulletLine.trim() !== '') break;
+                                j++;
+                                continue;
+                            }
+
+                            foundDetails = true;
+                            const key = bulletMatch[1].trim().toLowerCase().replace(/\s+/g, '');
+                            const value = cleanBold(bulletMatch[2]);
+
+                            if (key === 'date' || key === 'invoicedate') details.date = normalizeDate(value);
+                            else if (key === 'total' || key === 'amount') details.total = normalizePrice(value);
+                            else if (key === 'city' || key === 'billingcity') details.city = value;
+                            else if (key === 'country' || key === 'billingcountry') details.country = value;
+
+                            j++;
+                            while (j < lines.length && lines[j].trim() === '') j++;
+                        }
+
+                        if (foundDetails && (details.date || details.total)) {
+                            rows.push({ number, ...details });
+                            i = j;
+                        } else {
+                            kept.push(line);
+                            i++;
+                        }
+                    }
+
+                    if (rows.length > 0) {
+                        return { tableData: rows, tableType: 'invoices', remaining: kept.join('\n').trim() };
+                    }
+                    return null;
+                }
+
+                // Strategy 3c: Inline formats with regex patterns
+                const inlinePatterns = [
+                    // "1. **Invoice ID:** 382 - **Date:** 2025-08-07 - **Total:** $8.91"
+                    /(\d+)\.\s+\*\*Invoice\s*(?:ID)?:\*\*\s*(\d+)\s*[-–]\s*\*\*Date:\*\*\s*([^\s*-]+(?:\s+[\d:]+)?)\s*[-–]\s*\*\*Total:\*\*\s*\$?([\d.]+)/gi,
+                    // "1. Invoice 382 - Date: 2025-08-07 - Total: $8.91"
+                    /(\d+)\.\s+Invoice\s*#?(\d+)\s*[-–]\s*Date:\s*([^\s-]+(?:\s+[\d:]+)?)\s*[-–]\s*Total:\s*\$?([\d.]+)/gi,
+                    // "1. Invoice #382 (2025-08-07) - $8.91"
+                    /(\d+)\.\s+Invoice\s*#?(\d+)\s*\(([^)]+)\)\s*[-–]\s*\$?([\d.]+)/gi,
+                    // "- Invoice 382: Date 2025-08-07, Total $8.91"
+                    /[-•]\s*Invoice\s*#?(\d+):\s*Date\s+([^\s,]+(?:\s+[\d:]+)?),?\s*Total\s*\$?([\d.]+)/gi,
+                    // "Invoice ID: 382 | Date: 2025-08-07 | Total: $8.91"
+                    /Invoice\s*(?:ID)?:\s*(\d+)\s*\|\s*Date:\s*([^\s|]+(?:\s+[\d:]+)?)\s*\|\s*Total:\s*\$?([\d.]+)/gi,
+                ];
+
+                // Try split format first (most specific for this edge case)
+                const splitResult = detectSplitInvoiceFormat();
+                if (splitResult) return splitResult;
+
+                // Try block format
+                const blockResult = detectInvoiceBlocks();
+                if (blockResult) return blockResult;
+
+                // Try inline patterns
+                for (const pattern of inlinePatterns) {
+                    const matches = Array.from(raw.matchAll(pattern));
+                    if (matches.length >= 1) {
+                        let remaining = raw;
+                        const rows = matches.map((m, idx) => {
+                            remaining = remaining.replace(m[0], '');
+                            // Different patterns have different group positions
+                            const hasNumberPrefix = m[1] && /^\d+$/.test(m[1]) && m[2];
+                            const invoiceId = hasNumberPrefix ? m[2] : m[1];
+                            const date = hasNumberPrefix ? m[3] : m[2];
+                            const total = hasNumberPrefix ? m[4] : m[3];
+                            return {
+                                number: String(idx + 1),
+                                invoiceId,
+                                date: normalizeDate(date),
+                                total: normalizePrice(total)
+                            };
+                        });
+                        return { tableData: rows, tableType: 'invoices', remaining: remaining.trim() };
+                    }
+                }
+                return null;
+            }
+
+            // Strategy 4: Invoice line items / purchase details
+            // Handles multiple formats for invoice line item display
+            function detectInvoiceLineItems() {
+                // Strategy 4a: Block format - track name on its own line, details as bullets
+                // Format:
+                // Track Name (or **Track Name**)
+                // - **Artist:** Artist
+                // - **Album:** Album
+                // - **Unit Price:** $0.99
+                // - **Quantity:** 1
+                function detectInvoiceItemBlocks() {
+                    const lines = raw.split('\n');
+                    const rows = [];
+                    const kept = [];
+                    let i = 0;
+
+                    while (i < lines.length) {
+                        const line = lines[i];
+                        
+                        // Skip empty lines
+                        if (line.trim() === '') {
+                            kept.push(line);
+                            i++;
+                            continue;
+                        }
+                        
+                        // Look ahead to see if next non-empty lines have Artist/Album/Price bullets
+                        let j = i + 1;
+                        while (j < lines.length && lines[j].trim() === '') j++;
+                        
+                        // Check if we have invoice item bullets following
+                        const details = {};
+                        let foundInvoiceDetails = false;
+                        let bulletEndIdx = j;
+                        
+                        while (j < lines.length) {
+                            const bulletLine = lines[j];
+                            if (bulletLine.trim() === '') {
+                                j++;
+                                continue;
+                            }
+                            
+                            // Check for bullet with key-value
+                            const bulletMatch = bulletLine.match(/^\s*[-•]\s*\*?\*?([^:*]+)\*?\*?\s*:\s*(.+?)\s*$/);
+                            if (!bulletMatch) break;
+                            
+                            const key = bulletMatch[1].trim().toLowerCase().replace(/\s+/g, '');
+                            const value = cleanBold(bulletMatch[2]);
+                            
+                            if (key === 'artist' || key === 'artistname') {
+                                details.artist = value;
+                                foundInvoiceDetails = true;
+                            } else if (key === 'album' || key === 'albumtitle') {
+                                details.album = value;
+                                foundInvoiceDetails = true;
+                            } else if (key === 'unitprice' || key === 'price') {
+                                details.unitPrice = normalizePrice(value);
+                                foundInvoiceDetails = true;
+                            } else if (key === 'quantity' || key === 'qty') {
+                                details.quantity = value;
+                                foundInvoiceDetails = true;
+                            } else {
+                                // Not an invoice item bullet
+                                break;
+                            }
+                            
+                            bulletEndIdx = j + 1;
+                            j++;
+                        }
+                        
+                        // If we found invoice item details, treat the current line as track name
+                        if (foundInvoiceDetails && (details.artist || details.unitPrice)) {
+                            // Extract track name - remove any leading numbering, "even", etc.
+                            let trackName = line.trim();
+                            // Remove numbered prefix like "1. " or "- "
+                            trackName = trackName.replace(/^(?:\d+\.\s*)?(?:[-•]\s*)?/, '');
+                            // Clean bold markers
+                            trackName = cleanBold(trackName);
+                            
+                            rows.push({
+                                trackName,
+                                artist: details.artist || '',
+                                album: details.album || '',
+                                unitPrice: details.unitPrice || '',
+                                quantity: details.quantity || '1'
+                            });
+                            i = bulletEndIdx;
+                        } else {
+                            kept.push(line);
+                            i++;
+                        }
+                    }
+
+                    if (rows.length > 0) {
+                        return { tableData: rows, tableType: 'invoice-items', remaining: kept.join('\n').trim() };
+                    }
+                    return null;
+                }
+                
+                // Strategy 4b: Inline format
+                // Format: "- **Track Name:** Song - **Artist:** Artist - **Album:** Album - **Unit Price:** $0.99"
+                function detectInlineInvoiceItems() {
+                    const pattern = /[-•]\s*\*\*Track(?:\s*Name)?:\*\*\s*([^*\n-]+?)(?:\s*[-–]\s*\*\*Artist:\*\*\s*([^*\n-]+?))?(?:\s*[-–]\s*\*\*Album:\*\*\s*([^*\n-]+?))?(?:\s*[-–]\s*\*\*(?:Unit\s*)?Price:\*\*\s*\$?([\d.]+))?(?:\s*[-–]\s*\*\*Quantity:\*\*\s*(\d+))?/gi;
+                    
+                    const matches = Array.from(raw.matchAll(pattern));
+                    if (matches.length >= 1) {
+                        let remaining = raw;
+                        const rows = matches.map(m => {
+                            remaining = remaining.replace(m[0], '');
+                            return {
+                                trackName: cleanBold(m[1]),
+                                artist: cleanBold(m[2] || ''),
+                                album: cleanBold(m[3] || ''),
+                                unitPrice: normalizePrice(m[4]),
+                                quantity: m[5] || '1'
+                            };
+                        });
+                        return { tableData: rows, tableType: 'invoice-items', remaining: remaining.trim() };
+                    }
+                    return null;
+                }
+                
+                // Try block format first (more specific)
+                const blockResult = detectInvoiceItemBlocks();
+                if (blockResult) return blockResult;
+                
+                // Fall back to inline format
+                return detectInlineInvoiceItems();
+            }
+
+            // Strategy 5: Purchase confirmation
+            // Format: "- Invoice ID: 123 - Track: Song - Amount: $0.99 - Date: ..."
+            function detectPurchaseConfirmation() {
+                const pattern = /[-•]\s*Invoice\s*ID:\s*(\d+)\s*[-–]\s*Track:\s*([^-\n]+?)\s*[-–]\s*Amount:\s*\$?([\d.]+)\s*[-–]\s*Date:\s*([^\n]+)/gi;
+                
+                const matches = Array.from(raw.matchAll(pattern));
+                if (matches.length >= 1) {
+                    let remaining = raw;
+                    const rows = matches.map(m => {
+                        remaining = remaining.replace(m[0], '');
+                        return {
+                            invoiceId: m[1],
+                            track: cleanBold(m[2]),
+                            amount: normalizePrice(m[3]),
+                            date: m[4].trim()
+                        };
+                    });
+                    return { tableData: rows, tableType: 'purchase-confirmation', remaining: remaining.trim() };
+                }
+                return null;
+            }
+
+            // Strategy 6: Profile / Account info (key-value pairs)
+            // Format: "- **Name:** John Doe" or "**Email:** john@example.com"
+            function detectProfile() {
+                const pattern = /[-•]?\s*\*\*([^:*]+?):\*\*\s*([^\n*]+)/gi;
+                const matches = Array.from(raw.matchAll(pattern));
+                
+                // Only treat as profile if we have common profile fields
+                const profileFields = ['name', 'email', 'phone', 'address', 'city', 'state', 'country', 'postal', 'zip', 'customer'];
+                // Exclude invoice-related fields from profile detection
+                const excludeFields = ['invoice', 'billing', 'date', 'total', 'track', 'price', 'amount', 'quantity'];
+                
+                const relevantMatches = matches.filter(m => {
+                    const label = m[1].toLowerCase();
+                    // Must match a profile field and NOT match an exclude field
+                    const isProfile = profileFields.some(f => label.includes(f));
+                    const isExcluded = excludeFields.some(f => label.includes(f));
+                    return isProfile && !isExcluded;
+                });
+
+                if (relevantMatches.length >= 2) {
+                    let remaining = raw;
+                    const rows = relevantMatches.map(m => {
+                        remaining = remaining.replace(m[0], '');
+                        return {
+                            label: cleanBold(m[1]),
+                            value: cleanBold(m[2])
+                        };
+                    });
+                    return { tableData: rows, tableType: 'profile', remaining: remaining.trim() };
+                }
+                return null;
+            }
+
+            // Strategy 7: Simple numbered list with bold items (albums, artists)
+            // Format: "1. **Album Name**" or "1. **Artist Name**"
+            function detectBoldNumberedList() {
+                const pattern = /^(\d+)\.\s+\*\*([^*]+)\*\*\s*$/gm;
+                const matches = Array.from(raw.matchAll(pattern));
+                
+                // Require at least 2 items and no complex data
+                if (matches.length >= 2) {
+                    const hasComplexData = matches.some(m => 
+                        /TrackId|Price|Invoice|Date:/i.test(m[0])
+                    );
+                    
+                    if (!hasComplexData) {
+                        let remaining = raw;
+                        const rows = matches.map(m => {
+                            remaining = remaining.replace(m[0], '');
+                            return {
+                                number: m[1],
+                                name: cleanBold(m[2])
+                            };
+                        });
+                        
+                        // Infer type from context
+                        const beforeList = raw.slice(0, matches[0].index).toLowerCase();
+                        let tableType = 'items';
+                        if (/albums?\b/.test(beforeList)) tableType = 'albums';
+                        else if (/artists?\b/.test(beforeList)) tableType = 'artists';
+                        else if (/tracks?\b|songs?\b/.test(beforeList)) tableType = 'tracks-simple';
+                        else if (/genres?\b/.test(beforeList)) tableType = 'genres';
+                        
+                        return { tableData: rows, tableType, remaining: remaining.trim() };
+                    }
+                }
+                return null;
+            }
+
+            // Strategy 8: Plain numbered list (genres, simple names)
+            // Format: "1. Rock" or "1. AC/DC"
+            function detectPlainNumberedList() {
+                const pattern = /^(\d+)\.\s+([^*\n]+)$/gm;
+                const matches = Array.from(raw.matchAll(pattern));
+                
+                if (matches.length >= 2) {
+                    // Skip if contains structured data markers
+                    const hasStructured = matches.some(m => 
+                        /\*\*|TrackId|Price|Invoice|Date:|[-–].*:/.test(m[2])
+                    );
+                    
+                    if (!hasStructured) {
+                        let remaining = raw;
+                        const rows = matches.map(m => {
+                            remaining = remaining.replace(m[0], '');
+                            return {
+                                number: m[1],
+                                name: m[2].trim()
+                            };
+                        });
+                        
+                        // Infer type from context
+                        const beforeList = raw.slice(0, matches[0].index).toLowerCase();
+                        let tableType = 'items';
+                        if (/genres?\b/.test(beforeList)) tableType = 'genres';
+                        else if (/artists?\b/.test(beforeList)) tableType = 'artists';
+                        else if (/albums?\b/.test(beforeList)) tableType = 'albums';
+                        else if (/tracks?\b|songs?\b/.test(beforeList)) tableType = 'tracks-simple';
+                        
+                        return { tableData: rows, tableType, remaining: remaining.trim() };
+                    }
+                }
+                return null;
+            }
+
+            // Strategy 9: Simple bullet list (dash-prefixed items without structured data)
+            // Format: "- Rock" or "- Alternative & Punk"
+            function detectSimpleBulletList() {
+                const pattern = /^[-•]\s+([^*\n:]+)$/gm;
+                const matches = Array.from(raw.matchAll(pattern));
+                
+                if (matches.length >= 3) {
+                    // Skip if contains structured data markers (key: value patterns)
+                    const hasStructured = matches.some(m => 
+                        /\*\*|TrackId|Price|Invoice|Date/i.test(m[1])
+                    );
+                    
+                    if (!hasStructured) {
+                        let remaining = raw;
+                        const rows = matches.map((m, idx) => {
+                            remaining = remaining.replace(m[0], '');
+                            return {
+                                number: String(idx + 1),
+                                name: m[1].trim()
+                            };
+                        });
+                        
+                        // Infer type from context before the list
+                        const beforeList = raw.slice(0, matches[0].index).toLowerCase();
+                        let tableType = 'items';
+                        if (/genres?\b/.test(beforeList)) tableType = 'genres';
+                        else if (/artists?\b/.test(beforeList)) tableType = 'artists';
+                        else if (/albums?\b/.test(beforeList)) tableType = 'albums';
+                        else if (/tracks?\b|songs?\b/.test(beforeList)) tableType = 'tracks-simple';
+                        
+                        return { tableData: rows, tableType, remaining: remaining.trim() };
+                    }
+                }
+                return null;
+            }
+
+            // Strategy 9: Raw data format (JSON-like or Python dict format)
+            // Handles cases where tool output is shown more directly
+            function detectRawDataFormat() {
+                // Look for patterns like [{'InvoiceId': 382, 'InvoiceDate': '2025-08-07'...}]
+                // or {"InvoiceId": 382, "InvoiceDate": "2025-08-07"...}
+                
+                // Invoice data pattern
+                const invoiceDataPattern = /\[\s*\{[^}]*['"]InvoiceId['"]:\s*(\d+)[^}]*['"]InvoiceDate['"]:\s*['"]([^'"]+)['"][^}]*['"]Total['"]:\s*([\d.]+)[^}]*\}/gi;
+                const invoiceMatches = Array.from(raw.matchAll(invoiceDataPattern));
+                
+                if (invoiceMatches.length >= 1) {
+                    // This is raw invoice data - try to extract all records
+                    const recordPattern = /\{[^}]*['"]InvoiceId['"]:\s*(\d+)[^}]*['"]InvoiceDate['"]:\s*['"]([^'"]+)['"][^}]*['"]Total['"]:\s*([\d.]+)[^}]*\}/gi;
+                    const allMatches = Array.from(raw.matchAll(recordPattern));
+                    
+                    if (allMatches.length >= 1) {
+                        let remaining = raw;
+                        const rows = allMatches.map((m, idx) => {
+                            remaining = remaining.replace(m[0], '');
+                            return {
+                                number: String(idx + 1),
+                                invoiceId: m[1],
+                                date: m[2].replace(/\s+\d{2}:\d{2}:\d{2}/, ''),
+                                total: normalizePrice(m[3])
+                            };
+                        });
+                        // Clean up remaining brackets and commas
+                        remaining = remaining.replace(/^\s*\[\s*,?\s*/, '').replace(/\s*,?\s*\]\s*$/, '').trim();
+                        return { tableData: rows, tableType: 'invoices', remaining };
+                    }
+                }
+
+                // Track data pattern  
+                const trackDataPattern = /\[\s*\{[^}]*['"]TrackId['"]:\s*(\d+)[^}]*['"](?:TrackName|Name)['"]:\s*['"]([^'"]+)['"][^}]*\}/gi;
+                const trackMatches = Array.from(raw.matchAll(trackDataPattern));
+                
+                if (trackMatches.length >= 1) {
+                    const recordPattern = /\{[^}]*['"]TrackId['"]:\s*(\d+)[^}]*['"](?:TrackName|Name)['"]:\s*['"]([^'"]+)['"][^}]*(?:['"]UnitPrice['"]:\s*([\d.]+))?[^}]*\}/gi;
+                    const allMatches = Array.from(raw.matchAll(recordPattern));
+                    
+                    if (allMatches.length >= 1) {
+                        let remaining = raw;
+                        const rows = allMatches.map((m, idx) => {
+                            remaining = remaining.replace(m[0], '');
+                            return {
+                                number: String(idx + 1),
+                                trackId: m[1],
+                                name: m[2],
+                                price: m[3] ? normalizePrice(m[3]) : ''
+                            };
+                        });
+                        remaining = remaining.replace(/^\s*\[\s*,?\s*/, '').replace(/\s*,?\s*\]\s*$/, '').trim();
+                        return { tableData: rows, tableType: 'tracks', remaining };
+                    }
+                }
+
+                return null;
+            }
+
+            // Execute strategies in order of specificity
+            const strategies = [
+                detectTrackBlocks,
+                detectInlineTracks,
+                detectPurchaseHistory,
+                detectInvoiceLineItems,
+                detectPurchaseConfirmation,
+                detectRawDataFormat,  // Added to catch raw tool output
+                detectProfile,
+                detectBoldNumberedList,
+                detectPlainNumberedList,
+                detectSimpleBulletList,  // Simple dash-prefixed lists (genres, etc.)
+            ];
+
+            for (const strategy of strategies) {
+                const result = strategy();
+                if (result) {
+                    // Clean up remaining text
+                    let remaining = result.remaining
+                        .replace(/\*\*Album:[^*\n]+\*\*/g, '') // Remove album headers
+                        .replace(/\n{3,}/g, '\n\n') // Collapse multiple newlines
+                        .trim();
+                    return { ...result, remaining };
+                }
+            }
+
+            return { tableData: null, tableType: null, remaining: raw };
         }
 
+        /**
+         * Creates a beautifully styled table from parsed data
+         * Handles all table types with consistent styling and proper column names
+         */
         function createTable(tableData, tableType) {
+            if (!tableData || tableData.length === 0) return null;
+
             const table = document.createElement('table');
             table.className = 'message-table';
             
             const thead = document.createElement('thead');
             const tbody = document.createElement('tbody');
-            
-            // Create header based on table type
             const headerRow = document.createElement('tr');
-            
-            if (tableType === 'songs') {
-                const showDuration = tableData.some(r => (r.duration ?? '').toString().trim().length > 0);
-                headerRow.innerHTML = showDuration
-                    ? '<th>#</th><th>Track Name</th><th>Track ID</th><th>Duration</th><th>Price</th>'
-                    : '<th>#</th><th>Track Name</th><th>Track ID</th><th>Price</th>';
-                tableData.forEach(row => {
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = showDuration
-                        ? `
-                            <td class="table-number">${row.number}</td>
-                            <td><strong>${escapeHtml(row.name)}</strong></td>
-                            <td class="table-id">${escapeHtml(String(row.trackId ?? ''))}</td>
-                            <td class="table-date">${escapeHtml(String(row.duration ?? ''))}</td>
-                            <td class="table-price">${escapeHtml(String(row.price ?? ''))}</td>
-                        `
-                        : `
-                            <td class="table-number">${row.number}</td>
-                            <td><strong>${escapeHtml(row.name)}</strong></td>
-                            <td class="table-id">${escapeHtml(String(row.trackId ?? ''))}</td>
-                            <td class="table-price">${escapeHtml(String(row.price ?? ''))}</td>
-                        `;
-                    tbody.appendChild(tr);
+
+            // Configuration for each table type
+            const tableConfigs = {
+                'tracks': {
+                    getColumns: (data) => {
+                        const cols = [
+                            { key: 'number', header: '#', class: 'table-number' },
+                            { key: 'name', header: 'Track', class: '', bold: true },
+                        ];
+                        if (data.some(r => r.trackId)) cols.push({ key: 'trackId', header: 'ID', class: 'table-id' });
+                        if (data.some(r => r.artist)) cols.push({ key: 'artist', header: 'Artist', class: '' });
+                        if (data.some(r => r.album)) cols.push({ key: 'album', header: 'Album', class: '' });
+                        if (data.some(r => r.duration)) cols.push({ key: 'duration', header: 'Duration', class: 'table-duration' });
+                        if (data.some(r => r.genre)) cols.push({ key: 'genre', header: 'Genre', class: '' });
+                        if (data.some(r => r.price)) cols.push({ key: 'price', header: 'Price', class: 'table-price' });
+                        return cols;
+                    }
+                },
+                'tracks-simple': {
+                    columns: [
+                        { key: 'number', header: '#', class: 'table-number' },
+                        { key: 'name', header: 'Track', class: '', bold: true }
+                    ]
+                },
+                'invoices': {
+                    getColumns: (data) => {
+                        const cols = [
+                            { key: 'number', header: '#', class: 'table-number' },
+                            { key: 'invoiceId', header: 'Invoice', class: 'table-id' },
+                            { key: 'date', header: 'Date', class: 'table-date' },
+                        ];
+                        if (data.some(r => r.city)) cols.push({ key: 'city', header: 'City', class: '' });
+                        if (data.some(r => r.country)) cols.push({ key: 'country', header: 'Country', class: '' });
+                        cols.push({ key: 'total', header: 'Total', class: 'table-price' });
+                        return cols;
+                    }
+                },
+                'invoice-items': {
+                    getColumns: (data) => {
+                        const cols = [
+                            { key: 'trackName', header: 'Track', class: '', bold: true },
+                        ];
+                        if (data.some(r => r.artist)) cols.push({ key: 'artist', header: 'Artist', class: '' });
+                        if (data.some(r => r.album)) cols.push({ key: 'album', header: 'Album', class: '' });
+                        cols.push({ key: 'unitPrice', header: 'Price', class: 'table-price' });
+                        cols.push({ key: 'quantity', header: 'Qty', class: 'table-number' });
+                        return cols;
+                    }
+                },
+                'purchase-confirmation': {
+                    columns: [
+                        { key: 'invoiceId', header: 'Invoice ID', class: 'table-id' },
+                        { key: 'track', header: 'Track', class: '', bold: true },
+                        { key: 'amount', header: 'Amount', class: 'table-price' },
+                        { key: 'date', header: 'Date', class: 'table-date' }
+                    ]
+                },
+                'profile': {
+                    columns: [
+                        { key: 'label', header: 'Field', class: 'table-label', bold: true },
+                        { key: 'value', header: 'Value', class: '' }
+                    ]
+                },
+                'albums': {
+                    columns: [
+                        { key: 'number', header: '#', class: 'table-number' },
+                        { key: 'name', header: 'Album', class: '', bold: true }
+                    ]
+                },
+                'artists': {
+                    columns: [
+                        { key: 'number', header: '#', class: 'table-number' },
+                        { key: 'name', header: 'Artist', class: '', bold: true }
+                    ]
+                },
+                'genres': {
+                    columns: [
+                        { key: 'number', header: '#', class: 'table-number' },
+                        { key: 'name', header: 'Genre', class: '', bold: true }
+                    ]
+                },
+                'items': {
+                    columns: [
+                        { key: 'number', header: '#', class: 'table-number' },
+                        { key: 'name', header: 'Name', class: '', bold: true }
+                    ]
+                }
+            };
+
+            // Get configuration for this table type
+            const config = tableConfigs[tableType] || tableConfigs['items'];
+            const columns = config.getColumns ? config.getColumns(tableData) : config.columns;
+
+            // Build header
+            columns.forEach(col => {
+                const th = document.createElement('th');
+                th.textContent = col.header;
+                headerRow.appendChild(th);
+            });
+
+            // Build rows
+            tableData.forEach(row => {
+                const tr = document.createElement('tr');
+                columns.forEach(col => {
+                    const td = document.createElement('td');
+                    if (col.class) td.className = col.class;
+                    
+                    const value = escapeHtml(String(row[col.key] ?? ''));
+                    if (col.bold && value) {
+                        td.innerHTML = `<strong>${value}</strong>`;
+                    } else {
+                        td.textContent = value;
+                    }
+                    tr.appendChild(td);
                 });
-            } else if (tableType === 'purchase-history') {
-                headerRow.innerHTML = '<th>#</th><th>Invoice ID</th><th>Date</th><th>Total</th>';
-                tableData.forEach(row => {
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td class="table-number">${row.number}</td>
-                        <td class="table-id">${row.invoiceId}</td>
-                        <td class="table-date">${row.date}</td>
-                        <td class="table-price">${row.total}</td>
-                    `;
-                    tbody.appendChild(tr);
-                });
-            } else if (tableType === 'invoice-details') {
-                headerRow.innerHTML = '<th>Track Name</th><th>Artist</th><th>Album</th><th>Unit Price</th><th>Quantity</th>';
-                tableData.forEach(row => {
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td><strong>${escapeHtml(row.trackName)}</strong></td>
-                        <td>${escapeHtml(row.artist)}</td>
-                        <td>${escapeHtml(row.album)}</td>
-                        <td class="table-price">${row.unitPrice}</td>
-                        <td>${row.quantity}</td>
-                    `;
-                    tbody.appendChild(tr);
-                });
-            } else if (tableType === 'purchase-complete') {
-                headerRow.innerHTML = '<th>Invoice ID</th><th>Track</th><th>Amount</th><th>Date</th>';
-                tableData.forEach(row => {
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td class="table-id">${row.invoiceId}</td>
-                        <td><strong>${escapeHtml(row.track)}</strong></td>
-                        <td class="table-price">${row.amount}</td>
-                        <td class="table-date">${row.date}</td>
-                    `;
-                    tbody.appendChild(tr);
-                });
-            } else if (tableType === 'albums') {
-                headerRow.innerHTML = '<th>#</th><th>Album Name</th>';
-                tableData.forEach(row => {
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td class="table-number">${row.number}</td>
-                        <td><strong>${escapeHtml(row.name)}</strong></td>
-                    `;
-                    tbody.appendChild(tr);
-                });
-            } else if (tableType === 'tracks-simple') {
-                headerRow.innerHTML = '<th>#</th><th>Track Name</th>';
-                tableData.forEach(row => {
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td class="table-number">${row.number}</td>
-                        <td><strong>${escapeHtml(row.name)}</strong></td>
-                    `;
-                    tbody.appendChild(tr);
-                });
-            } else if (tableType === 'profile') {
-                headerRow.innerHTML = '<th>Field</th><th>Value</th>';
-                tableData.forEach(row => {
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td><strong>${escapeHtml(row.label)}</strong></td>
-                        <td>${escapeHtml(row.value)}</td>
-                    `;
-                    tbody.appendChild(tr);
-                });
-            } else if (tableType === 'simple-list') {
-                headerRow.innerHTML = '<th>#</th><th>Name</th>';
-                tableData.forEach(row => {
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td class="table-number">${row.number}</td>
-                        <td>${escapeHtml(row.name)}</td>
-                    `;
-                    tbody.appendChild(tr);
-                });
-            }
-            
+                tbody.appendChild(tr);
+            });
+
             thead.appendChild(headerRow);
             table.appendChild(thead);
             table.appendChild(tbody);
@@ -2212,8 +2777,10 @@
             
             if (tableData && tableData.length > 0) {
                 const table = createTable(tableData, tableType);
-                bubbleEl.appendChild(table);
-                remaining = textAfterTable;
+                if (table) {
+                    bubbleEl.appendChild(table);
+                    remaining = textAfterTable;
+                }
             }
 
             if (remaining) {
