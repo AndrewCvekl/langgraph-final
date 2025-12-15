@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
 """CLI runner for the customer support bot.
 
-Provides an interactive terminal interface with:
-- Token streaming
-- Node transition display
-- Tool call display
-- HITL interrupt handling
+DEBUG MODE: Shows exactly what each node produces for message debugging.
 """
 
 import os
@@ -42,15 +38,23 @@ class Colors:
     GREEN = '\033[92m'
     YELLOW = '\033[93m'
     RED = '\033[91m'
+    MAGENTA = '\033[35m'
+    WHITE = '\033[97m'
     ENDC = '\033[0m'
     BOLD = '\033[1m'
     DIM = '\033[2m'
+    BG_BLUE = '\033[44m'
+    BG_GREEN = '\033[42m'
+    BG_YELLOW = '\033[43m'
+    BG_RED = '\033[41m'
+    BG_MAGENTA = '\033[45m'
+    BG_CYAN = '\033[46m'
 
 
 def print_header():
     """Print the CLI header."""
     print(f"\n{Colors.BOLD}{Colors.CYAN}╔══════════════════════════════════════════════════════════════╗{Colors.ENDC}")
-    print(f"{Colors.BOLD}{Colors.CYAN}║     🎵 Music Store Customer Support Bot (LangGraph Demo)     ║{Colors.ENDC}")
+    print(f"{Colors.BOLD}{Colors.CYAN}║     🎵 Music Store Customer Support Bot (DEBUG MODE)         ║{Colors.ENDC}")
     print(f"{Colors.BOLD}{Colors.CYAN}╚══════════════════════════════════════════════════════════════╝{Colors.ENDC}")
     print(f"{Colors.DIM}Type 'quit' or 'exit' to end the conversation.{Colors.ENDC}")
     print(f"{Colors.DIM}Type 'help' for example commands.{Colors.ENDC}")
@@ -67,34 +71,77 @@ def print_help():
     print(f"  {Colors.GREEN}• Show me my profile{Colors.ENDC}")
     print(f"  {Colors.GREEN}• What are my recent purchases?{Colors.ENDC}")
     print(f"  {Colors.GREEN}• I want to change my email{Colors.ENDC}")
-    print(f"  {Colors.GREEN}• I remember some lyrics: 'back in black I hit the sack'{Colors.ENDC}")
+    print(f"  {Colors.GREEN}• What song is 'back in black I hit the sack'{Colors.ENDC}")
     print(f"  {Colors.GREEN}• I want to buy track 1{Colors.ENDC}")
     print()
 
 
-def print_node_event(node_name: str, event_type: str):
-    """Print node transition events."""
+def print_node_box(node_name: str, event_type: str, message_count: int = 0):
+    """Print a clear node boundary box."""
+    width = 60
     if event_type == "start":
-        print(f"\n{Colors.DIM}[{node_name}] Starting...{Colors.ENDC}")
+        print(f"\n{Colors.BOLD}{Colors.BG_BLUE}{Colors.WHITE} {'─' * width} {Colors.ENDC}")
+        print(f"{Colors.BOLD}{Colors.BG_BLUE}{Colors.WHITE}  ▶ NODE: {node_name.upper():50} {Colors.ENDC}")
+        print(f"{Colors.BOLD}{Colors.BG_BLUE}{Colors.WHITE} {'─' * width} {Colors.ENDC}")
     else:
-        print(f"{Colors.DIM}[{node_name}] Finished{Colors.ENDC}")
+        if message_count > 0:
+            summary = f"({message_count} message(s) emitted)"
+        else:
+            summary = "(no messages)"
+        print(f"{Colors.DIM}└── {node_name} finished {summary}{Colors.ENDC}")
 
 
-def print_tool_call(tool_name: str, tool_args: dict):
-    """Print tool invocation."""
-    print(f"\n{Colors.YELLOW}🔧 Tool: {tool_name}{Colors.ENDC}")
-    if tool_args:
-        args_str = ", ".join(f"{k}={v}" for k, v in tool_args.items() if k != "config")
-        print(f"{Colors.DIM}   Args: {args_str}{Colors.ENDC}")
+def print_message_debug(msg: Any, node_name: str, status: str, msg_id: str = None):
+    """Print a message with full debug info in a clear box."""
+    # Determine the status color and symbol
+    if status == "NEW":
+        status_color = Colors.BG_GREEN
+        symbol = "✓"
+    elif status == "SKIPPED":
+        status_color = Colors.BG_YELLOW
+        symbol = "⊘"
+    else:
+        status_color = Colors.BG_MAGENTA
+        symbol = "?"
+    
+    msg_type = type(msg).__name__
+    short_id = msg_id[-8:] if msg_id else "no-id"
+    
+    # Header line
+    print(f"\n{Colors.BOLD}{status_color}{Colors.WHITE} {symbol} {status} MESSAGE {Colors.ENDC} {Colors.DIM}[{msg_type}] id:...{short_id}{Colors.ENDC}")
+    
+    if status == "SKIPPED":
+        # Just show it was skipped
+        content_preview = str(getattr(msg, 'content', ''))[:50]
+        print(f"    {Colors.DIM}Content: \"{content_preview}...\" (already seen){Colors.ENDC}")
+        return
+    
+    # Show the actual content in a highlighted box
+    content = getattr(msg, 'content', None)
+    if content:
+        print(f"    {Colors.BOLD}┌{'─' * 56}┐{Colors.ENDC}")
+        # Word wrap content for display
+        lines = content.split('\n')
+        for line in lines:
+            # Truncate very long lines
+            if len(line) > 54:
+                line = line[:51] + "..."
+            print(f"    {Colors.BOLD}│{Colors.ENDC} {line:<54} {Colors.BOLD}│{Colors.ENDC}")
+        print(f"    {Colors.BOLD}└{'─' * 56}┘{Colors.ENDC}")
+    
+    # Show tool calls if any
+    tool_calls = getattr(msg, 'tool_calls', None)
+    if tool_calls:
+        print(f"    {Colors.YELLOW}Tool Calls: {len(tool_calls)}{Colors.ENDC}")
+        for tc in tool_calls:
+            print(f"      → {tc['name']}({tc.get('args', {})})")
 
 
-def print_tool_result(tool_name: str, result: str):
-    """Print tool result (truncated if too long)."""
-    max_len = 200
-    result_str = str(result)
-    if len(result_str) > max_len:
-        result_str = result_str[:max_len] + "..."
-    print(f"{Colors.DIM}   Result: {result_str}{Colors.ENDC}")
+def print_tool_result_debug(msg: ToolMessage, node_name: str):
+    """Print tool result with debug info."""
+    content = str(msg.content)[:100] + "..." if len(str(msg.content)) > 100 else str(msg.content)
+    print(f"    {Colors.CYAN}🔧 Tool Result [{msg.name}]:{Colors.ENDC}")
+    print(f"       {Colors.DIM}{content}{Colors.ENDC}")
 
 
 def handle_interrupt(interrupt_value: dict) -> str:
@@ -104,7 +151,8 @@ def handle_interrupt(interrupt_value: dict) -> str:
     message = interrupt_value.get("message", "Please respond:")
     options = interrupt_value.get("options", [])
     
-    print(f"\n{Colors.BOLD}{Colors.YELLOW}⏸️  {title}{Colors.ENDC}")
+    print(f"\n{Colors.BOLD}{Colors.BG_YELLOW}{Colors.WHITE} ⏸ INTERRUPT {Colors.ENDC}")
+    print(f"{Colors.BOLD}{Colors.YELLOW}{title}{Colors.ENDC}")
     print(f"{Colors.CYAN}{message}{Colors.ENDC}")
     
     if options:
@@ -118,7 +166,7 @@ def handle_interrupt(interrupt_value: dict) -> str:
 
 
 def run_cli():
-    """Main CLI loop."""
+    """Main CLI loop with enhanced debug output."""
     print_header()
     
     # Initialize database
@@ -162,7 +210,9 @@ def run_cli():
     while True:
         try:
             # Get user input
-            user_input = input(f"{Colors.BOLD}You: {Colors.ENDC}").strip()
+            print(f"\n{Colors.BOLD}{'═' * 62}{Colors.ENDC}")
+            user_input = input(f"{Colors.BOLD}{Colors.GREEN}You: {Colors.ENDC}").strip()
+            print(f"{Colors.BOLD}{'═' * 62}{Colors.ENDC}")
             
             if not user_input:
                 continue
@@ -175,26 +225,23 @@ def run_cli():
                 print_help()
                 continue
             
-            # Add user message to state (always include customer_id for state consistency)
+            # Add user message to state
             input_state = {
                 "messages": [HumanMessage(content=user_input)],
                 "customer_id": DEMO_CUSTOMER_ID,
             }
             
-            print(f"\n{Colors.BOLD}Bot:{Colors.ENDC} ", end="", flush=True)
-            
-            # Stream the response
-            final_response = ""
+            # Stream the response with debug output
             current_node = None
-            # Track seen message IDs to avoid duplicates (subgraphs can re-emit messages)
+            node_message_count = 0
             seen_message_ids: set[str] = set()
             
             try:
                 from langgraph.types import Command
                 
                 def process_stream(stream_input, is_resume=False):
-                    """Process a stream of events, handling interrupts recursively."""
-                    nonlocal final_response, current_node, seen_message_ids
+                    """Process a stream of events with debug output."""
+                    nonlocal current_node, node_message_count, seen_message_ids
                     
                     for event in graph.stream(
                         stream_input,
@@ -207,8 +254,6 @@ def run_cli():
                             for interrupt_info in interrupts:
                                 interrupt_value = interrupt_info.value if hasattr(interrupt_info, 'value') else interrupt_info
                                 response = handle_interrupt(interrupt_value)
-                                
-                                # Resume with the user's response (recursive call handles nested interrupts)
                                 process_stream(Command(resume=response), is_resume=True)
                             continue
                         
@@ -217,46 +262,55 @@ def run_cli():
                             if node_name.startswith("__"):
                                 continue
                             
+                            # Node transition
                             if node_name != current_node:
                                 if current_node is not None:
-                                    print_node_event(current_node, "end")
+                                    print_node_box(current_node, "end", node_message_count)
                                 current_node = node_name
-                                print_node_event(node_name, "start")
+                                node_message_count = 0
+                                print_node_box(node_name, "start")
                             
                             if not node_output:
                                 continue
                             
-                            # Handle messages (with deduplication)
+                            # Handle messages with DEBUG output
                             if "messages" in node_output:
                                 for msg in node_output["messages"]:
-                                    # Skip messages we've already displayed
                                     msg_id = getattr(msg, 'id', None)
+                                    
+                                    # Check if we've seen this message
                                     if msg_id and msg_id in seen_message_ids:
+                                        # SKIPPED - already seen
+                                        print_message_debug(msg, node_name, "SKIPPED", msg_id)
                                         continue
+                                    
                                     if msg_id:
                                         seen_message_ids.add(msg_id)
                                     
+                                    # NEW message
                                     if isinstance(msg, AIMessage):
                                         if msg.tool_calls:
-                                            for tc in msg.tool_calls:
-                                                print_tool_call(tc["name"], tc.get("args", {}))
+                                            print_message_debug(msg, node_name, "NEW", msg_id)
                                         elif msg.content:
-                                            print(f"\n{msg.content}")
-                                            final_response = msg.content
+                                            print_message_debug(msg, node_name, "NEW", msg_id)
+                                            node_message_count += 1
                                     elif isinstance(msg, ToolMessage):
-                                        print_tool_result(msg.name, msg.content)
+                                        print_tool_result_debug(msg, node_name)
                 
-                # Start processing the stream
+                # Start processing
                 process_stream(input_state)
                 
                 if current_node:
-                    print_node_event(current_node, "end")
+                    print_node_box(current_node, "end", node_message_count)
                     
             except KeyboardInterrupt:
                 print(f"\n{Colors.YELLOW}Interrupted. Type 'quit' to exit.{Colors.ENDC}")
                 continue
             
-            print()  # Add newline after response
+            # Summary
+            print(f"\n{Colors.BOLD}{Colors.CYAN}{'─' * 62}{Colors.ENDC}")
+            print(f"{Colors.BOLD}{Colors.CYAN}  TURN COMPLETE - {len(seen_message_ids)} unique messages processed{Colors.ENDC}")
+            print(f"{Colors.BOLD}{Colors.CYAN}{'─' * 62}{Colors.ENDC}")
             
         except KeyboardInterrupt:
             print(f"\n\n{Colors.CYAN}Goodbye! 🎵{Colors.ENDC}\n")
@@ -270,4 +324,3 @@ def run_cli():
 
 if __name__ == "__main__":
     run_cli()
-

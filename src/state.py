@@ -40,6 +40,10 @@ class SupportState(TypedDict):
     lyrics_identified_song: Optional[str]  # Song name from identification
     lyrics_identified_artist: Optional[str]  # Artist name from identification
     lyrics_purchase_confirmed: Optional[bool]  # Set by lyrics subgraph when user confirms purchase
+    
+    # Current user message for subgraph handoff (prevents message accumulation)
+    # Set by parent nodes before routing to subgraphs that use Input/Output schemas
+    current_user_message: Optional[str]
 
 
 def get_initial_state(customer_id: int = 1) -> dict:
@@ -63,4 +67,5 @@ def get_initial_state(customer_id: int = 1) -> dict:
         "lyrics_identified_song": None,
         "lyrics_identified_artist": None,
         "lyrics_purchase_confirmed": None,
+        "current_user_message": None,
     }

@@ -148,18 +148,29 @@ def catalog_qa_node(
     - __end__: When response is complete
     """
     
+    # Get the current user message for subgraph handoff
+    last_message = _get_last_user_message(state)
+    
     # First, check if we're in the middle of a lyrics conversation
     # (user is responding to "Would you like to purchase?" or "Want us to add it?")
     if state.get("lyrics_awaiting_response"):
-        # Continue the lyrics conversation - subgraph's router will handle the response
-        return Command(goto="lyrics")
+        # Continue the lyrics conversation - pass current message for subgraph
+        # The subgraph uses Input/Output schemas, so we pass current_user_message
+        # instead of the full message history to prevent message accumulation
+        return Command(
+            update={"current_user_message": last_message},
+            goto="lyrics"
+        )
     
     # Check if this is a NEW lyrics identification request
     if _detect_lyrics_intent(state):
         # Route to lyrics subgraph - it will handle the identification workflow
-        last_message = _get_last_user_message(state)
+        # Pass both lyrics_query and current_user_message for the subgraph
         return Command(
-            update={"lyrics_query": last_message},
+            update={
+                "lyrics_query": last_message,
+                "current_user_message": last_message,
+            },
             goto="lyrics"
         )
     
