@@ -184,8 +184,12 @@ def router_node(
     This is the entry point for the lyrics subgraph.
     - If lyrics_awaiting_response is True → handle the user's yes/no
     - Otherwise → start the song identification flow
+    
+    IMPORTANT: Don't update messages here - the messages are already in state
+    from the parent graph. Adding them again causes duplicate streaming.
     """
     if state.get("lyrics_awaiting_response"):
+        # Route directly to handle_response - messages are already in state
         return Command(goto="handle_response")
     else:
         return Command(goto="identify_song")

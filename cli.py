@@ -186,13 +186,15 @@ def run_cli():
             # Stream the response
             final_response = ""
             current_node = None
+            # Track seen message IDs to avoid duplicates (subgraphs can re-emit messages)
+            seen_message_ids: set[str] = set()
             
             try:
                 from langgraph.types import Command
                 
                 def process_stream(stream_input, is_resume=False):
                     """Process a stream of events, handling interrupts recursively."""
-                    nonlocal final_response, current_node
+                    nonlocal final_response, current_node, seen_message_ids
                     
                     for event in graph.stream(
                         stream_input,
@@ -224,9 +226,16 @@ def run_cli():
                             if not node_output:
                                 continue
                             
-                            # Handle messages
+                            # Handle messages (with deduplication)
                             if "messages" in node_output:
                                 for msg in node_output["messages"]:
+                                    # Skip messages we've already displayed
+                                    msg_id = getattr(msg, 'id', None)
+                                    if msg_id and msg_id in seen_message_ids:
+                                        continue
+                                    if msg_id:
+                                        seen_message_ids.add(msg_id)
+                                    
                                     if isinstance(msg, AIMessage):
                                         if msg.tool_calls:
                                             for tc in msg.tool_calls:
