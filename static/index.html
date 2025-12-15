@@ -240,10 +240,34 @@
             gap: 0.5rem;
         }
 
+        /* Larger content area for video messages - class-based for reliability */
+        .message-content.has-video,
+        .message-content:has(.video-card),
+        .message-content:has(.video-embed),
+        .message-content:has(.video-message-wrapper) {
+            max-width: min(95%, 1000px) !important;
+        }
+
+        /* Also expand the bubble itself for video */
+        .message-content.has-video .message-bubble,
+        .message-bubble:has(.video-card),
+        .message-bubble:has(.video-embed),
+        .message-bubble:has(.video-message-wrapper) {
+            max-width: 100%;
+            width: 100%;
+        }
+
         @media (max-width: 640px) {
             .message-content {
                 max-width: 90%;
                 min-width: 0;
+            }
+            /* Keep video messages wider even on mobile */
+            .message-content.has-video,
+            .message-content:has(.video-card),
+            .message-content:has(.video-embed),
+            .message-content:has(.video-message-wrapper) {
+                max-width: 95% !important;
             }
         }
 
@@ -895,7 +919,7 @@
             background: #000;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
             width: 100%;
-            max-width: 720px;
+            max-width: 100%;
             aspect-ratio: 16 / 9;
             position: relative;
         }
@@ -1048,7 +1072,7 @@
             background: #000;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
             width: 100%;
-            max-width: 720px;
+            max-width: 100%;
         }
 
         .video-embed video {
@@ -1287,6 +1311,10 @@
         }
 
         .message-table .table-id {
+            text-align: center;
+        }
+
+        .message-table .table-id .id-badge {
             color: var(--teal-600);
             font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
             font-size: 0.8125rem;
@@ -1454,8 +1482,8 @@
         let isProcessing = false;
         let loadingStateIndex = 0;
         let loadingInterval = null;
-        // Track displayed messages to prevent duplicates (subgraphs can re-emit)
-        let seenMessageContents = new Set();
+        // NOTE: Deduplication removed - graph-level Input/Output schemas now prevent duplicates
+        // let seenMessageContents = new Set();
 
         // DOM Elements
         const messagesArea = document.getElementById('messages-area');
@@ -1631,11 +1659,8 @@
                                     break;
 
                                 case 'message':
-                                    // Skip duplicate messages (subgraphs can re-emit)
-                                    if (!seenMessageContents.has(data.content)) {
-                                        seenMessageContents.add(data.content);
-                                        addMessage('assistant', data.content);
-                                    }
+                                    // NOTE: No deduplication - graph-level fix handles this
+                                    addMessage('assistant', data.content);
                                     break;
 
                                 case 'interrupt':
@@ -1848,9 +1873,10 @@
                     html += '</div>';
                 }
                 
-                // Add any remaining text
+                // Add any remaining text (process markdown bold)
                 if (remainingText) {
-                    html += `<p class="interrupt-message-text">${escapeHtml(remainingText)}</p>`;
+                    const formattedText = escapeHtml(remainingText).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+                    html += `<p class="interrupt-message-text">${formattedText}</p>`;
                 }
                 
                 return html;
@@ -2002,7 +2028,8 @@
                     }
 
                     const number = headerMatch[1];
-                    const name = cleanBold(headerMatch[2]);
+                    // Strip price from track name if present (e.g. "Song - $0.99" -> "Song")
+                    const name = cleanBold(headerMatch[2]).replace(/\s*[-–]\s*\$[\d.]+\s*$/, '').trim();
                     
                     // Look for bullet details
                     let j = i + 1;
@@ -2058,8 +2085,8 @@
                 const patterns = [
                     // "1. **Song** - TrackId: 123, Price: $0.99"
                     /(\d+)\.\s+\*\*([^*]+)\*\*\s*[-–]\s*TrackId:\s*(\d+)(?:,\s*Price:\s*\$?([\d.]+))?/gi,
-                    // "1. Song Name (TrackId: 123, $0.99)"
-                    /(\d+)\.\s+([^(\n]+?)\s*\(TrackId:\s*(\d+)(?:,?\s*\$?([\d.]+))?\)/gi,
+                    // "1. Song Name (TrackId: 123, $0.99)" - handles names with parens like "Song(2)"
+                    /(\d+)\.\s+(.+?)\s*\(TrackId:\s*(\d+)(?:,?\s*\$?([\d.]+))?\)/gi,
                     // "- **Track:** Song **ID:** 123 **Price:** $0.99"
                     /[-•]\s*\*\*Track:\*\*\s*([^*\n]+?)(?:\s*\*\*(?:Track\s*)?ID:\*\*\s*(\d+))?(?:\s*\*\*Price:\*\*\s*\$?([\d.]+))?/gi,
                 ];
@@ -2071,12 +2098,14 @@
                         const rows = matches.map((m, idx) => {
                             remaining = remaining.replace(m[0], '');
                             // Extract price from track name if not captured (e.g. "Song - $0.99")
-                            const trackName = cleanBold(m[2] || m[1]);
+                            let trackName = cleanBold(m[2] || m[1]);
                             let price = m[4] ? normalizePrice(m[4]) : '';
                             if (!price) {
                                 const priceInName = trackName.match(/\$\s*([\d.]+)/);
                                 if (priceInName) price = normalizePrice(priceInName[1]);
                             }
+                            // Strip price from track name (e.g. "Song - $0.99" -> "Song")
+                            trackName = trackName.replace(/\s*[-–]\s*\$[\d.]+\s*$/, '').trim();
                             return {
                                 number: m[1] || String(idx + 1),
                                 name: trackName,
@@ -2812,6 +2841,9 @@
                     const value = escapeHtml(String(row[col.key] ?? ''));
                     if (col.bold && value) {
                         td.innerHTML = `<strong>${value}</strong>`;
+                    } else if (col.class === 'table-id' && value) {
+                        // Wrap ID values in a span for badge styling
+                        td.innerHTML = `<span class="id-badge">${value}</span>`;
                     } else {
                         td.textContent = value;
                     }
@@ -2975,6 +3007,11 @@
                 }
 
                 bubbleEl.appendChild(wrapper);
+                // Add class to message-content for CSS targeting (more reliable than :has())
+                const messageContent = bubbleEl.closest('.message-content');
+                if (messageContent) {
+                    messageContent.classList.add('has-video');
+                }
                 remaining = '';  // All content handled
             }
 

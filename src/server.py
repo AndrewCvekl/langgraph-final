@@ -113,7 +113,7 @@ async def start_chat(request: ChatRequest):
         "input": {"messages": [HumanMessage(content=request.message)]},
         "events": [],
         "interrupt": None,
-        "seen_message_ids": set(),  # Track seen messages to avoid duplicates
+        # NOTE: Deduplication removed - graph-level Input/Output schemas now prevent duplicates
     }
     
     return ChatResponse(run_id=run_id, session_id=session_id)
@@ -150,8 +150,7 @@ async def stream_response(run_id: str):
         try:
             run["status"] = "running"
             current_node = None
-            # Use run's seen_message_ids to persist across stream calls (e.g., after interrupt resume)
-            seen_message_ids = run.get("seen_message_ids", set())
+            # NOTE: No deduplication needed - graph-level Input/Output schemas prevent duplicates
             
             for event in graph.stream(
                 run["input"],
@@ -183,16 +182,9 @@ async def stream_response(run_id: str):
                     if not node_output:
                         continue
                     
-                    # Process messages (with deduplication)
+                    # Process messages (no deduplication needed - graph handles it)
                     if "messages" in node_output:
                         for msg in node_output["messages"]:
-                            # Skip messages we've already sent
-                            msg_id = getattr(msg, 'id', None)
-                            if msg_id and msg_id in seen_message_ids:
-                                continue
-                            if msg_id:
-                                seen_message_ids.add(msg_id)
-                            
                             if isinstance(msg, AIMessage):
                                 if msg.tool_calls:
                                     for tc in msg.tool_calls:
@@ -299,4 +291,3 @@ async def serve_ui():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
