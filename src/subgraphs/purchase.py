@@ -32,6 +32,9 @@ class PurchaseState(TypedDict):
     pending_track_id: Optional[int]
     pending_track_name: Optional[str]
     pending_track_price: Optional[float]
+    
+    # Clear this when purchase completes (came from lyrics flow)
+    lyrics_purchase_confirmed: Optional[bool]
 
 
 def check_ownership_node(
@@ -55,6 +58,7 @@ def check_ownership_node(
                 "pending_track_id": None,
                 "pending_track_name": None,
                 "pending_track_price": None,
+                "lyrics_purchase_confirmed": False,  # Clear lyrics flow state
             },
             goto="__end__"
         )
@@ -70,6 +74,7 @@ def check_ownership_node(
                 "pending_track_id": None,
                 "pending_track_name": None,
                 "pending_track_price": None,
+                "lyrics_purchase_confirmed": False,  # Clear lyrics flow state
             },
             goto="__end__"
         )
@@ -115,6 +120,7 @@ This will charge your account and add the track to your library.""",
                 "pending_track_id": None,
                 "pending_track_name": None,
                 "pending_track_price": None,
+                "lyrics_purchase_confirmed": False,  # Clear lyrics flow state
             },
             goto="__end__"
         )
@@ -141,6 +147,7 @@ def execute_purchase_node(state: PurchaseState) -> dict:
         "pending_track_id": None,
         "pending_track_name": None,
         "pending_track_price": None,
+        "lyrics_purchase_confirmed": False,  # Clear lyrics flow state
     }
 
 
