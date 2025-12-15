@@ -107,3 +107,4 @@ if __name__ == "__main__":
     db = get_db()
     print(f"Available tables: {db.get_usable_table_names()}")
 
+

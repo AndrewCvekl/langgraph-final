@@ -1,12 +1,11 @@
 """Account QA node for customer account information.
 
-Handles questions about profile, invoices, and purchase history.
-Can detect email change intent for handoff.
+Handles everything account-related:
+- Profile information
+- Invoices and purchase history
+- Email changes (hands off to email_change subgraph)
 
-Follows LangGraph "Thinking in LangGraph" design principles:
-- Returns Command with explicit goto destination
-- Type hints declare all possible destinations
-- Routes to its own tool node (account_tools)
+Uses structured output for detecting email change intent instead of magic strings.
 """
 
 from typing import Literal
@@ -14,6 +13,7 @@ from typing import Literal
 from langchain_core.messages import SystemMessage, AIMessage
 from langchain_openai import ChatOpenAI
 from langgraph.types import Command
+from pydantic import BaseModel, Field
 
 from src.state import SupportState
 from src.tools.account import (
@@ -23,6 +23,19 @@ from src.tools.account import (
 )
 
 
+class AccountResponse(BaseModel):
+    """Structured response from the account agent."""
+    
+    response: str = Field(
+        description="The response message to show the user"
+    )
+    
+    wants_email_change: bool = Field(
+        default=False,
+        description="True if the user wants to change/update their email address"
+    )
+
+
 ACCOUNT_SYSTEM_PROMPT = """You are a helpful customer service assistant for a music store.
 
 You can help customers with their account:
@@ -30,15 +43,21 @@ You can help customers with their account:
 - See their purchase history (invoices)
 - View details of specific invoices (what tracks they bought)
 
-You have access to their account securely - you don't need to ask for their customer ID.
+You have secure access to their account - you don't need to ask for their customer ID.
 
-If a customer wants to UPDATE their email address, let them know you'll transfer them 
-to our email verification process. Include "[EMAIL_CHANGE_INTENT]" at the end of your 
-response so the system can route them appropriately.
+## TOOLS AVAILABLE:
+- get_my_profile: Get customer's profile info
+- get_my_invoices: Get customer's invoice history
+- get_my_invoice_lines: Get details of a specific invoice
 
-Be helpful and protect their privacy - don't share sensitive info unless they ask for it.
-If they have concerns about security, reassure them that we verify email changes with a 
-code sent to their phone on file."""
+## EMAIL CHANGES:
+If a customer wants to UPDATE their email address, we need to verify their identity first.
+Set wants_email_change to True in your response to start the verification process.
+
+Example responses when they want to change email:
+- "I'd be happy to help you update your email. We'll need to verify your identity first - I'll send a code to your phone on file."
+
+Be helpful and protect their privacy - don't share sensitive info unless they ask."""
 
 
 ACCOUNT_TOOLS = [
@@ -50,51 +69,53 @@ ACCOUNT_TOOLS = [
 
 def account_qa_node(
     state: SupportState
-) -> Command[Literal["account_tools", "router", "__end__"]]:
+) -> Command[Literal["account_tools", "email_change", "__end__"]]:
     """Handle account-related questions.
     
-    Uses customer-scoped tools and may detect email change intent.
-    
-    Returns Command with explicit routing:
+    Routes:
     - account_tools: When LLM wants to call tools
-    - router: When email change intent detected (router sends to email_change)
+    - email_change: When email change intent detected (direct handoff to subgraph)
     - __end__: When response is complete
     """
     model = ChatOpenAI(model="gpt-4o", temperature=0)
-    model_with_tools = model.bind_tools(ACCOUNT_TOOLS)
     
+    # First pass: let LLM use tools if needed
+    model_with_tools = model.bind_tools(ACCOUNT_TOOLS)
     messages = [SystemMessage(content=ACCOUNT_SYSTEM_PROMPT)] + state["messages"]
     
     # Pass customer_id through config for the tools
-    customer_id = state.get("customer_id", 1)  # Default to demo customer
+    customer_id = state.get("customer_id", 1)
     config = {"configurable": {"customer_id": customer_id}}
     
     response = model_with_tools.invoke(messages, config=config)
     
-    # If the model wants to call tools, route to our dedicated tool node
+    # If the model wants to call tools, route to tool node
     if response.tool_calls:
         return Command(
             update={"messages": [response]},
             goto="account_tools"
         )
     
-    # Check for email change intent
-    content = response.content
-    
-    if "[EMAIL_CHANGE_INTENT]" in content:
-        # Clean up the message and route to email_change via router
-        clean_content = content.replace("[EMAIL_CHANGE_INTENT]", "").strip()
+    # No tool calls - check for email change intent
+    try:
+        structured_model = model.with_structured_output(AccountResponse)
+        structured_response = structured_model.invoke(messages + [response])
+        
+        if structured_response.wants_email_change:
+            return Command(
+                update={"messages": [AIMessage(content=structured_response.response)]},
+                goto="email_change"  # Direct handoff to email_change subgraph
+            )
+        
+        # Normal response
         return Command(
-            update={
-                "messages": [AIMessage(content=clean_content)],
-                "route": "email_change",
-            },
-            goto="router"
+            update={"messages": [AIMessage(content=structured_response.response)]},
+            goto="__end__"
         )
-    
-    # Normal response - end this turn
-    return Command(
-        update={"messages": [response]},
-        goto="__end__"
-    )
-
+        
+    except Exception:
+        # Fallback to unstructured response
+        return Command(
+            update={"messages": [response]},
+            goto="__end__"
+        )

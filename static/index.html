@@ -1787,6 +1787,88 @@
         function parseListToTable(content) {
             // Detect ordered lists with structured data
             // Pattern: numbered items with key-value pairs or structured data
+
+            // First: detect "track blocks" where a numbered track name is followed by
+            // bullet key/value lines (TrackId/Duration/Price). This is the exact case
+            // where the UI previously turned names into an "Album Name" table and
+            // left the bullet details behind.
+            function parseTrackBlocks(input) {
+                const lines = String(input ?? '').replace(/\r\n/g, '\n').split('\n');
+                const kept = [];
+                const rows = [];
+
+                const isNumbered = (line) => /^\s*\d+\.\s+/.test(line);
+                const parseNumberedName = (line) => {
+                    const m = line.match(/^\s*(\d+)\.\s+(.+?)\s*$/);
+                    if (!m) return null;
+                    const number = m[1];
+                    let name = m[2].trim();
+                    // Strip markdown bold wrappers if present
+                    name = name.replace(/^\*\*(.+?)\*\*$/, '$1').trim();
+                    return { number, name };
+                };
+
+                let i = 0;
+                while (i < lines.length) {
+                    const line = lines[i];
+                    const header = parseNumberedName(line);
+                    if (!header) {
+                        kept.push(line);
+                        i += 1;
+                        continue;
+                    }
+
+                    // Look ahead for bullet details belonging to this numbered item.
+                    // Accept optional blank lines between the header and bullets.
+                    let j = i + 1;
+                    while (j < lines.length && lines[j].trim() === '') j += 1;
+
+                    const details = {};
+                    let consumedAnyDetail = false;
+
+                    while (j < lines.length) {
+                        const l = lines[j];
+                        if (isNumbered(l)) break; // next item
+                        // Only treat bullet-ish lines as detail lines; otherwise stop.
+                        const bullet = l.match(/^\s*-\s*([^:]+)\s*:\s*(.+?)\s*$/);
+                        if (!bullet) break;
+
+                        consumedAnyDetail = true;
+                        const rawKey = bullet[1].trim().toLowerCase();
+                        const value = bullet[2].trim();
+
+                        if (rawKey === 'trackid' || rawKey === 'track id') details.trackId = value;
+                        else if (rawKey === 'duration') details.duration = value;
+                        else if (rawKey === 'price') details.price = value.startsWith('$') ? value : `$${value}`;
+                        else details[rawKey] = value;
+
+                        j += 1;
+                        // Allow blank line(s) inside a block
+                        while (j < lines.length && lines[j].trim() === '') j += 1;
+                    }
+
+                    // If we captured any real track fields, emit a row and consume the block.
+                    const hasTrackFields = Boolean(details.trackId || details.price || details.duration);
+                    if (consumedAnyDetail && hasTrackFields) {
+                        rows.push({
+                            number: header.number,
+                            name: header.name,
+                            trackId: details.trackId || '',
+                            duration: details.duration || '',
+                            price: details.price || '',
+                        });
+                        // Consume header + bullet lines; do not keep them.
+                        i = j;
+                        continue;
+                    }
+
+                    // Not a track block; keep the header line and continue (don't eat following lines).
+                    kept.push(line);
+                    i += 1;
+                }
+
+                return { rows, remaining: kept.join('\n').trim() };
+            }
             
             // Pattern 1: Song lists with TrackId and Price
             // Example: "1. **Song Name** - TrackId: 123, Price: $0.99"
@@ -1820,14 +1902,24 @@
             let tableData = null;
             let tableType = null;
             let remaining = content;
+
+            // Try to match track blocks (name + bullet details) first
+            const trackBlock = parseTrackBlocks(content);
+            if (trackBlock.rows.length >= 1) {
+                tableData = trackBlock.rows;
+                tableType = 'songs';
+                remaining = trackBlock.remaining;
+                return { tableData, tableType, remaining: remaining.trim() };
+            }
             
             // Try to match song list pattern
             const songMatches = Array.from(content.matchAll(songListPattern));
-            if (songMatches.length >= 2) {
+            if (songMatches.length >= 1) {
                 tableData = songMatches.map(match => ({
                     number: match[1],
                     name: match[2].trim(),
                     trackId: match[3],
+                    duration: '',
                     price: `$${match[4]}`
                 }));
                 tableType = 'songs';
@@ -1892,11 +1984,16 @@
                                 // Check if any match has TrackId/Price to avoid false positives
                                 const hasComplexData = albumMatches.some(m => m[0].includes('TrackId') || m[0].includes('Price'));
                                 if (!hasComplexData) {
+                                    // Infer whether this is an album list or a track list from nearby text.
+                                    // If the surrounding text says "track(s)", render as tracks.
+                                    const firstIdx = typeof albumMatches[0].index === 'number' ? albumMatches[0].index : 0;
+                                    const preamble = content.slice(Math.max(0, firstIdx - 220), firstIdx).toLowerCase();
+                                    const looksLikeTracks = /\btracks?\b/.test(preamble) && !/\balbums?\b/.test(preamble);
                                     tableData = albumMatches.map(match => ({
                                         number: match[1],
                                         name: match[2].trim()
                                     }));
-                                    tableType = 'albums';
+                                    tableType = looksLikeTracks ? 'tracks-simple' : 'albums';
                                     albumMatches.forEach(match => {
                                         remaining = remaining.replace(match[0], '');
                                     });
@@ -1960,15 +2057,26 @@
             const headerRow = document.createElement('tr');
             
             if (tableType === 'songs') {
-                headerRow.innerHTML = '<th>#</th><th>Track Name</th><th>Track ID</th><th>Price</th>';
+                const showDuration = tableData.some(r => (r.duration ?? '').toString().trim().length > 0);
+                headerRow.innerHTML = showDuration
+                    ? '<th>#</th><th>Track Name</th><th>Track ID</th><th>Duration</th><th>Price</th>'
+                    : '<th>#</th><th>Track Name</th><th>Track ID</th><th>Price</th>';
                 tableData.forEach(row => {
                     const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td class="table-number">${row.number}</td>
-                        <td><strong>${escapeHtml(row.name)}</strong></td>
-                        <td class="table-id">${row.trackId}</td>
-                        <td class="table-price">${row.price}</td>
-                    `;
+                    tr.innerHTML = showDuration
+                        ? `
+                            <td class="table-number">${row.number}</td>
+                            <td><strong>${escapeHtml(row.name)}</strong></td>
+                            <td class="table-id">${escapeHtml(String(row.trackId ?? ''))}</td>
+                            <td class="table-date">${escapeHtml(String(row.duration ?? ''))}</td>
+                            <td class="table-price">${escapeHtml(String(row.price ?? ''))}</td>
+                        `
+                        : `
+                            <td class="table-number">${row.number}</td>
+                            <td><strong>${escapeHtml(row.name)}</strong></td>
+                            <td class="table-id">${escapeHtml(String(row.trackId ?? ''))}</td>
+                            <td class="table-price">${escapeHtml(String(row.price ?? ''))}</td>
+                        `;
                     tbody.appendChild(tr);
                 });
             } else if (tableType === 'purchase-history') {
@@ -2010,6 +2118,16 @@
                 });
             } else if (tableType === 'albums') {
                 headerRow.innerHTML = '<th>#</th><th>Album Name</th>';
+                tableData.forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td class="table-number">${row.number}</td>
+                        <td><strong>${escapeHtml(row.name)}</strong></td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } else if (tableType === 'tracks-simple') {
+                headerRow.innerHTML = '<th>#</th><th>Track Name</th>';
                 tableData.forEach(row => {
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
@@ -2175,3 +2293,4 @@
     </script>
 </body>
 </html>
+

@@ -1,20 +1,20 @@
-"""Catalog QA node for music browsing.
+"""Catalog QA node for music browsing and purchasing.
 
-Handles questions about genres, artists, albums, and tracks.
-Can detect purchase intent and extract TrackId for handoff.
+Handles everything music-related:
+- Browsing genres, artists, albums
+- Searching for tracks
+- Detecting lyrics identification requests (routes to lyrics subgraph)
+- Initiating purchases (hands off to purchase subgraph)
 
-Follows LangGraph "Thinking in LangGraph" design principles:
-- Returns Command with explicit goto destination
-- Type hints declare all possible destinations
-- Routes to its own tool node (catalog_tools)
+catalog_qa is the "music brain" - it handles browsing AND detects lyrics intent.
 """
 
-from typing import Literal
-import re
+from typing import Literal, Optional
 
-from langchain_core.messages import SystemMessage, AIMessage
+from langchain_core.messages import SystemMessage, AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.types import Command
+from pydantic import BaseModel, Field
 
 from src.state import SupportState
 from src.tools.catalog import (
@@ -26,6 +26,46 @@ from src.tools.catalog import (
 )
 
 
+class IntentClassification(BaseModel):
+    """Classify the user's intent."""
+    
+    intent: Literal["lyrics", "browse", "purchase", "other"] = Field(
+        description="""The user's intent:
+        - lyrics: User provided song lyrics and wants to identify the song
+        - browse: User wants to browse/search the catalog (genres, artists, albums, tracks)
+        - purchase: User wants to buy a specific track they already know
+        - other: General conversation or unclear intent
+        """
+    )
+    
+    reasoning: str = Field(
+        description="Brief explanation of why this intent was detected"
+    )
+
+
+class CatalogResponse(BaseModel):
+    """Structured response from the catalog agent."""
+    
+    response: str = Field(
+        description="The response message to show the user"
+    )
+    
+    purchase_track_id: Optional[int] = Field(
+        default=None,
+        description="TrackId if the user wants to purchase a track (only set after confirming track exists)"
+    )
+    
+    purchase_track_name: Optional[str] = Field(
+        default=None,
+        description="Track name for purchase confirmation"
+    )
+    
+    purchase_track_price: Optional[float] = Field(
+        default=None,
+        description="Track price for purchase confirmation"
+    )
+
+
 CATALOG_SYSTEM_PROMPT = """You are a helpful music store assistant specializing in our catalog.
 
 You can help customers:
@@ -35,31 +75,29 @@ You can help customers:
 - See tracks in an album
 - Search for specific tracks by name or TrackId
 
-When showing tracks, always include the TrackId and price - customers need the TrackId to make a purchase.
+## TOOLS AVAILABLE:
+- list_genres: Show all music genres
+- artists_in_genre: Find artists in a genre
+- albums_by_artist: Get albums by an artist
+- tracks_in_album: See tracks in an album
+- find_track: Search for tracks by name or TrackId
 
-## IMPORTANT: Handling Purchase Intent
+## IMPORTANT: When showing tracks, ALWAYS include:
+- TrackId (customers need this to purchase)
+- Price
+- Artist and album info
 
-If a customer expresses interest in purchasing a track:
-1. **ALWAYS use the find_track tool first** to look up the track by name if they mention a track name
-2. If they reference a track from a previous listing (e.g., "buy track 3" or "yes" after you showed a track), use the TrackId from that listing
-3. If they mention a number, look for the track in the most recent list you showed
-4. **Only after you have confirmed the track exists**, include "[PURCHASE_INTENT: TrackId=X, Name=Y, Price=Z]" at the end of your response
+## PURCHASE FLOW:
+If a customer wants to buy a track:
+1. FIRST use find_track to look it up and confirm it exists
+2. ONLY AFTER confirming, set the purchase fields in your response
+3. Include the TrackId, track name, and price
 
 Examples:
-- "I want to buy Kashmir" → First use find_track("Kashmir"), then include [PURCHASE_INTENT: ...] with the results
-- "yes" (after showing a track) → Include [PURCHASE_INTENT: ...] with the previously shown track
-- "buy track 2969" → Use find_track to verify, then include [PURCHASE_INTENT: TrackId=2969, Name=..., Price=...]
+- "I want to buy Kashmir" → Use find_track("Kashmir"), then set purchase_track_id, name, price
+- "Show me rock artists" → Just respond, no purchase fields
 
-Be helpful and conversational. If you can't find what they're looking for, suggest alternatives.
-
-CRITICAL: When a customer wants to purchase a track by name (like "I want to buy Kashmir"):
-1. You MUST use find_track tool to search for it first
-2. Show them the track details
-3. Include [PURCHASE_INTENT: TrackId=X, Name=Y, Price=Z] to trigger the purchase flow
-
-Never include [PURCHASE_INTENT:...] without first verifying the track exists in our catalog!
-
-IMPORTANT: If the conversation history indicates the customer ALREADY OWNS a track, do NOT include [PURCHASE_INTENT:...]. Just let them know they already own it and it's in their library."""
+Be helpful and conversational. If you can't find what they're looking for, suggest alternatives."""
 
 
 CATALOG_TOOLS = [
@@ -71,62 +109,102 @@ CATALOG_TOOLS = [
 ]
 
 
+def _get_last_user_message(state: SupportState) -> str:
+    """Get the content of the last human message."""
+    for msg in reversed(state.get("messages", [])):
+        if isinstance(msg, HumanMessage):
+            return msg.content.strip()
+    return ""
+
+
+def _detect_lyrics_intent(state: SupportState) -> bool:
+    """Use LLM to detect if the user is asking about lyrics."""
+    model = ChatOpenAI(model="gpt-4o", temperature=0)
+    classifier = model.with_structured_output(IntentClassification)
+    
+    last_message = _get_last_user_message(state)
+    
+    classification = classifier.invoke([
+        SystemMessage(content="""Classify the user's intent for a music store chatbot.
+
+LYRICS intent means the user provided SONG LYRICS and wants to identify what song it is.
+Examples of LYRICS intent:
+- "What song goes 'we will rock you'?"
+- "Is this the real life, is this just fantasy"
+- "What song has the lyrics 'hello from the other side'?"
+
+BROWSE intent means they want to explore the catalog.
+PURCHASE intent means they want to buy a specific track.
+OTHER is for greetings, thanks, or unclear queries."""),
+        HumanMessage(content=last_message)
+    ])
+    
+    return classification.intent == "lyrics"
+
+
 def catalog_qa_node(
     state: SupportState
-) -> Command[Literal["catalog_tools", "router", "__end__"]]:
-    """Handle catalog-related questions.
+) -> Command[Literal["catalog_tools", "lyrics", "purchase", "__end__"]]:
+    """Handle catalog-related questions, lyrics identification, and purchases.
     
-    Uses tools to query the database and may detect purchase intent.
-    
-    Returns Command with explicit routing:
-    - catalog_tools: When LLM wants to call tools
-    - router: When purchase intent detected (router sends to purchase_flow)
+    Routes:
+    - lyrics: When user provides lyrics (routes to lyrics subgraph)
+    - catalog_tools: When LLM wants to call catalog tools
+    - purchase: When purchase intent detected (direct handoff to subgraph)
     - __end__: When response is complete
     """
-    model = ChatOpenAI(model="gpt-4o", temperature=0)
-    model_with_tools = model.bind_tools(CATALOG_TOOLS)
     
+    # First, check if this is a lyrics identification request
+    if _detect_lyrics_intent(state):
+        # Route to lyrics subgraph - it will handle the identification workflow
+        last_message = _get_last_user_message(state)
+        return Command(
+            update={"lyrics_query": last_message},
+            goto="lyrics"
+        )
+    
+    # Not lyrics - handle as normal catalog query
+    model = ChatOpenAI(model="gpt-4o", temperature=0)
+    
+    # Let LLM use tools if needed
+    model_with_tools = model.bind_tools(CATALOG_TOOLS)
     messages = [SystemMessage(content=CATALOG_SYSTEM_PROMPT)] + state["messages"]
     
     response = model_with_tools.invoke(messages)
     
-    # If the model wants to call tools, route to our dedicated tool node
+    # If the model wants to call tools, route to tool node
     if response.tool_calls:
         return Command(
             update={"messages": [response]},
             goto="catalog_tools"
         )
     
-    # Check for purchase intent in the response
-    content = response.content
-    
-    # Parse purchase intent if present
-    if "[PURCHASE_INTENT:" in content:
-        match = re.search(
-            r'\[PURCHASE_INTENT:\s*TrackId=(\d+),\s*Name=([^,]+),\s*Price=([^\]]+)\]',
-            content
-        )
-        if match:
-            try:
-                price = float(match.group(3).strip().replace("$", ""))
-            except ValueError:
-                price = 0.99
-            
-            # Route to router which will send to purchase_flow
+    # No tool calls - try to get structured response for purchase detection
+    try:
+        structured_model = model.with_structured_output(CatalogResponse)
+        structured_response = structured_model.invoke(messages + [response])
+        
+        # Check for purchase intent
+        if structured_response.purchase_track_id:
             return Command(
                 update={
-                    "messages": [response],
-                    "pending_track_id": int(match.group(1)),
-                    "pending_track_name": match.group(2).strip(),
-                    "pending_track_price": price,
-                    "route": "purchase_flow",
+                    "messages": [AIMessage(content=structured_response.response)],
+                    "pending_track_id": structured_response.purchase_track_id,
+                    "pending_track_name": structured_response.purchase_track_name,
+                    "pending_track_price": structured_response.purchase_track_price or 0.99,
                 },
-                goto="router"
+                goto="purchase"  # Direct handoff to purchase subgraph
             )
-    
-    # Normal response - end this turn
-    return Command(
-        update={"messages": [response]},
-        goto="__end__"
-    )
-
+        
+        # Normal response
+        return Command(
+            update={"messages": [AIMessage(content=structured_response.response)]},
+            goto="__end__"
+        )
+        
+    except Exception:
+        # Fallback to unstructured response
+        return Command(
+            update={"messages": [response]},
+            goto="__end__"
+        )

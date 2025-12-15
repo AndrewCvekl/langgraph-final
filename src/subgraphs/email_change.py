@@ -1,0 +1,312 @@
+"""Email change subgraph with HITL verification.
+
+A proper multi-node workflow for handling email changes with SMS verification.
+Following "Thinking in LangGraph" - each step is its own node.
+
+Flow:
+1. confirm_send: Confirm sending verification code to phone
+2. send_code: Send the verification code via Twilio
+3. verify_code: User enters the code (with self-loop for retry, up to 3 attempts)
+4. enter_email: User enters new email address
+5. update_email: Update the database
+"""
+
+import re
+import logging
+from typing import Annotated, Optional, Literal
+
+from langchain_core.messages import AIMessage, BaseMessage
+from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import add_messages
+from langgraph.types import interrupt, Command
+from typing_extensions import TypedDict
+
+from src.tools.account import update_my_email
+from src.tools.services import get_twilio_service
+from src.db import get_db
+
+logger = logging.getLogger(__name__)
+
+
+class EmailChangeState(TypedDict):
+    """State for the email change subgraph.
+    
+    Shared fields with parent + internal workflow fields.
+    """
+    # Inherited from parent
+    messages: Annotated[list[BaseMessage], add_messages]
+    customer_id: int
+    
+    # Internal workflow state
+    phone: Optional[str]
+    masked_phone: Optional[str]
+    verification_id: Optional[str]
+    verification_code: Optional[str]  # For mock mode display
+    attempts: int
+    new_email: Optional[str]
+
+
+def _get_customer_phone(customer_id: int) -> str:
+    """Get the customer's phone number from the database."""
+    db = get_db()
+    result = db.run(
+        f"SELECT Phone FROM Customer WHERE CustomerId = {customer_id};"
+    )
+    phone = result.strip().replace("(", "").replace(")", "").replace("'", "").replace(",", "")
+    return phone if phone else ""
+
+
+def _mask_phone(phone: str) -> str:
+    """Mask a phone number, showing only the last 4 digits."""
+    if not phone:
+        return "No phone on file"
+    if len(phone) >= 4:
+        return "*" * (len(phone) - 4) + phone[-4:]
+    return phone
+
+
+def confirm_send_node(
+    state: EmailChangeState
+) -> Command[Literal["send_code", "__end__"]]:
+    """Step 1: Confirm sending verification code.
+    
+    Gets the customer's phone number and asks for confirmation
+    before sending the verification code.
+    
+    Routes to:
+    - send_code: If user confirms
+    - __end__: If no phone on file or user declines
+    """
+    customer_id = state.get("customer_id", 1)
+    
+    # Get phone number from database
+    phone = _get_customer_phone(customer_id)
+    masked_phone = _mask_phone(phone)
+    
+    if not phone:
+        return Command(
+            update={
+                "messages": [AIMessage(content="I don't have a phone number on file for your account. Please contact support to update your email address.")],
+            },
+            goto="__end__"
+        )
+    
+    # HITL: Confirm sending code
+    confirm = interrupt({
+        "type": "confirm",
+        "title": "Verify Your Identity",
+        "message": f"To change your email, we need to verify your identity.\n\nWe'll send a 6-digit verification code to your phone ({masked_phone}).\n\nWould you like to continue?",
+        "options": ["yes", "no"]
+    })
+    
+    if confirm.lower() != "yes":
+        return Command(
+            update={
+                "messages": [AIMessage(content="No problem! Your email remains unchanged. Is there anything else I can help you with?")],
+            },
+            goto="__end__"
+        )
+    
+    # User confirmed - proceed to send code
+    return Command(
+        update={
+            "phone": phone,
+            "masked_phone": masked_phone,
+        },
+        goto="send_code"
+    )
+
+
+def send_code_node(
+    state: EmailChangeState
+) -> Command[Literal["verify_code"]]:
+    """Step 2: Send the verification code via Twilio.
+    
+    This is an action step - calls external API.
+    Always routes to verify_code after sending.
+    """
+    phone = state.get("phone", "")
+    masked_phone = state.get("masked_phone", "")
+    
+    # Send verification code
+    twilio = get_twilio_service()
+    verification_id = twilio.send_code(phone)
+    verification_code = twilio.get_pending_code(verification_id)  # For mock display
+    
+    if twilio.is_live:
+        msg = f"📱 Verification code sent to {masked_phone} via SMS!"
+    else:
+        msg = f"📱 Sending verification code to {masked_phone}..."
+    
+    return Command(
+        update={
+            "messages": [AIMessage(content=msg)],
+            "verification_id": verification_id,
+            "verification_code": verification_code,
+            "attempts": 0,
+        },
+        goto="verify_code"
+    )
+
+
+def verify_code_node(
+    state: EmailChangeState
+) -> Command[Literal["verify_code", "enter_email", "__end__"]]:
+    """Step 3: Verify the code entered by user.
+    
+    Uses a self-loop pattern for retries (up to 3 attempts).
+    
+    Routes to:
+    - enter_email: If code is correct
+    - verify_code: If code is wrong (retry, up to 3 attempts)
+    - __end__: If max attempts exceeded
+    """
+    verification_id = state.get("verification_id")
+    verification_code = state.get("verification_code")
+    attempts = state.get("attempts", 0)
+    masked_phone = state.get("masked_phone", "")
+    
+    twilio = get_twilio_service()
+    
+    # Check if too many attempts already
+    if attempts >= 3:
+        return Command(
+            update={
+                "messages": [AIMessage(content="Too many incorrect attempts. For security, please try again later or contact support.")],
+            },
+            goto="__end__"
+        )
+    
+    # Build prompt based on mode
+    if twilio.is_live:
+        prompt_msg = f"Please enter the 6-digit code sent to {masked_phone}.\n\nAttempt {attempts + 1} of 3."
+    else:
+        prompt_msg = f"Please enter the 6-digit code sent to {masked_phone}.\n\nAttempt {attempts + 1} of 3.\n\n[Demo mode: The code is **{verification_code}**]"
+    
+    # HITL: Ask for code
+    entered_code = interrupt({
+        "type": "input",
+        "title": "Enter Verification Code",
+        "message": prompt_msg,
+        "field": "code"
+    })
+    
+    # Verify the code
+    is_valid = twilio.check_code(verification_id, entered_code.strip())
+    
+    if is_valid:
+        return Command(
+            update={
+                "messages": [AIMessage(content="✅ Code verified successfully!")],
+            },
+            goto="enter_email"
+        )
+    
+    # Code was wrong - increment attempts
+    new_attempts = attempts + 1
+    
+    if new_attempts >= 3:
+        return Command(
+            update={
+                "messages": [AIMessage(content="❌ Incorrect code. Too many failed attempts. For security, please try again later or contact support.")],
+                "attempts": new_attempts,
+            },
+            goto="__end__"
+        )
+    
+    # Still have attempts remaining - loop back (self-edge)
+    return Command(
+        update={
+            "messages": [AIMessage(content=f"❌ Incorrect code. You have {3 - new_attempts} attempt(s) remaining.")],
+            "attempts": new_attempts,
+        },
+        goto="verify_code"  # Self-loop for retry!
+    )
+
+
+def enter_email_node(
+    state: EmailChangeState
+) -> Command[Literal["update_email", "__end__"]]:
+    """Step 4: Collect new email address.
+    
+    User has been verified - now get their new email.
+    
+    Routes to:
+    - update_email: If email is valid
+    - __end__: If email is invalid
+    """
+    # HITL: Ask for new email
+    new_email = interrupt({
+        "type": "input",
+        "title": "Enter New Email",
+        "message": "Your identity has been verified.\n\nPlease enter your new email address:",
+        "field": "email"
+    })
+    
+    # Basic email validation
+    if not re.match(r'^[\w.+-]+@[\w-]+\.[\w.-]+$', new_email.strip()):
+        return Command(
+            update={
+                "messages": [AIMessage(content=f"'{new_email}' doesn't look like a valid email address. Please try the email change process again.")],
+            },
+            goto="__end__"
+        )
+    
+    # Email is valid - proceed to update
+    return Command(
+        update={
+            "new_email": new_email.strip(),
+        },
+        goto="update_email"
+    )
+
+
+def update_email_node(state: EmailChangeState) -> dict:
+    """Step 5: Update the email in the database.
+    
+    This is the final action step - mutates the database.
+    Always returns to END after completion.
+    """
+    customer_id = state.get("customer_id", 1)
+    new_email = state.get("new_email", "")
+    
+    # Update the email in the database
+    config = {"configurable": {"customer_id": customer_id}}
+    result = update_my_email.invoke({"new_email": new_email}, config=config)
+    
+    return {
+        "messages": [AIMessage(content=f"✅ {result}\n\nIs there anything else I can help you with?")],
+    }
+
+
+def build_email_change_subgraph() -> StateGraph:
+    """Build the email change subgraph.
+    
+    Graph structure:
+        START → confirm_send → send_code → verify_code ⟲ → enter_email → update_email → END
+                     │                          │               │
+                     ▼                          ▼               ▼
+                    END                        END             END
+                (no phone/declined)      (max attempts)   (invalid email)
+    
+    The verify_code node has a self-loop for retry attempts.
+    """
+    builder = StateGraph(EmailChangeState)
+    
+    # Add nodes
+    builder.add_node("confirm_send", confirm_send_node)
+    builder.add_node("send_code", send_code_node)
+    builder.add_node("verify_code", verify_code_node)
+    builder.add_node("enter_email", enter_email_node)
+    builder.add_node("update_email", update_email_node)
+    
+    # Add edges
+    builder.add_edge(START, "confirm_send")
+    # Most routing is handled by Command in each node
+    builder.add_edge("update_email", END)
+    
+    return builder
+
+
+# Compiled subgraph for import
+email_change_subgraph = build_email_change_subgraph().compile()

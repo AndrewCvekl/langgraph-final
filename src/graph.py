@@ -1,18 +1,68 @@
 """Main graph definition for the customer support bot.
 
-Follows LangGraph "Thinking in LangGraph" design principles:
-- Each agent has its OWN tool node (no shared tools)
-- Nodes use Command for explicit routing
-- Minimal edges - routing logic lives inside nodes
-- Retry policies on tool nodes for resilience
+Clean architecture following LangGraph best practices:
+- Moderator → Supervisor → Domain Experts → Subgraphs
+- catalog_qa is the "music brain" (handles browsing AND lyrics detection)
+- Lyrics subgraph is self-contained with internal router for both flows
+- Purchase subgraph uses HITL confirmation for actual purchase
+
+Lyrics Flow (CONVERSATIONAL - all self-contained in lyrics subgraph):
+
+MODE 1 - New lyrics query (lyrics_awaiting_response = False):
+  1. User provides lyrics → catalog_qa routes to lyrics subgraph
+  2. Lyrics subgraph: router → identify_song → check_catalog → get_youtube → present_options
+  3. present_options asks "Would you like to buy?" and sets lyrics_awaiting_response=True
+  4. Turn ENDS - user sees the question
+
+MODE 2 - User response (lyrics_awaiting_response = True):
+  5. User responds "yes" or "no" → supervisor routes to lyrics subgraph
+  6. Lyrics subgraph: router → handle_response → sets lyrics_purchase_confirmed
+  7. After subgraph ends, conditional edge routes to purchase if confirmed
 
 Architecture:
-- Router: Classifies intent and routes to appropriate agent
-- QA Agents: Each has its own LLM node + dedicated tool node
-  - catalog_qa ↔ catalog_tools
-  - account_qa ↔ account_tools  
-  - lyrics_qa ↔ lyrics_tools
-- Workflow Nodes: HITL flows with interrupts (email_change, purchase_flow)
+                    ┌─────────────┐
+                    │  Moderator  │ ← Input safety guard
+                    └──────┬──────┘
+                           │
+                    ┌──────▼──────┐
+                    │  Supervisor │ ← Routes to domain experts
+                    └──────┬──────┘
+                           │
+              ┌────────────┴────────────┐
+              ▼                         ▼
+        ┌──────────┐              ┌──────────┐
+        │CatalogQA │              │AccountQA │
+        └────┬─────┘              └────┬─────┘
+             │                         │
+    ┌────────┴────────┐           ┌────┴─────┐
+    ▼                 ▼           ▼          ▼
+ tools             lyrics      tools    email_chg
+                   subgraph
+                      │
+        ┌─────────────┴─────────────┐
+        │    lyrics subgraph        │
+        │  ┌─────────────────────┐  │
+        │  │       router        │  │ ← checks lyrics_awaiting_response
+        │  └──────────┬──────────┘  │
+        │       ┌─────┴─────┐       │
+        │       ▼           ▼       │
+        │  identify_song  handle    │
+        │       │         _response │
+        │       ▼           │       │
+        │  check_catalog    │       │
+        │       │           │       │
+        │       ▼           │       │
+        │  get_youtube      │       │
+        │       │           │       │
+        │       ▼           │       │
+        │  present_options  │       │
+        └───────────────────┴───────┘
+                      │
+                      ▼
+            ┌─────────────────┐
+            │ if purchase     │──► purchase_subgraph
+            │ confirmed       │
+            └─────────────────┘
 """
 
 from langgraph.graph import StateGraph, START, END
@@ -21,56 +71,60 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import RetryPolicy
 
 from src.state import SupportState
-from src.nodes.router import router_node
-from src.nodes.catalog_qa import catalog_qa_node, CATALOG_TOOLS
-from src.nodes.account_qa import account_qa_node, ACCOUNT_TOOLS
-from src.nodes.lyrics_qa import lyrics_qa_node, LYRICS_TOOLS
-from src.nodes.email_change import email_change_node
-from src.nodes.purchase_flow import purchase_flow_node
+from src.nodes import (
+    supervisor_node,
+    moderator_node,
+    catalog_qa_node,
+    account_qa_node,
+    CATALOG_TOOLS,
+    ACCOUNT_TOOLS,
+)
+from src.subgraphs import purchase_subgraph, email_change_subgraph, lyrics_subgraph
 
 
 # ============================================================================
 # TOOL NODES: Each agent gets its own dedicated tool node
-# This follows the "discrete steps" principle - clear boundaries per agent
 # ============================================================================
 catalog_tools_node = ToolNode(CATALOG_TOOLS)
 account_tools_node = ToolNode(ACCOUNT_TOOLS)
-lyrics_tools_node = ToolNode(LYRICS_TOOLS)
 
 
-# ============================================================================
-# ROUTING: No complex routing functions needed!
-# Each node now uses Command to specify its destination explicitly.
-# Tools always route back to their owning agent via simple edges.
-# ============================================================================
+def route_after_lyrics(state: SupportState) -> str:
+    """Route after lyrics subgraph completes.
+    
+    If lyrics_purchase_confirmed is True (user said yes to purchase),
+    route to purchase subgraph. Otherwise, end.
+    """
+    if state.get("lyrics_purchase_confirmed") and state.get("pending_track_id"):
+        return "purchase"
+    return END
 
 
 def build_graph() -> StateGraph:
     """Build and return the support bot graph.
     
-    Architecture follows "Thinking in LangGraph" principles:
-    - Each agent has its own tool node
-    - Nodes use Command for routing (no external routing functions)
-    - Simple edges where possible
-    - Retry policies on tool nodes
+    Architecture:
+    - Moderator checks input safety
+    - Supervisor routes to domain experts (or lyrics subgraph if awaiting response)
+    - catalog_qa detects lyrics intent and routes to lyrics subgraph
+    - Lyrics subgraph is self-contained: handles identification AND response
+    - After lyrics, conditional edge routes to purchase if user confirmed
     """
-    
-    # Create the graph
     builder = StateGraph(SupportState)
     
     # =========================================================================
     # ADD NODES
     # =========================================================================
     
-    # Router node - classifies intent
-    builder.add_node("router", router_node)
+    # Entry nodes
+    builder.add_node("moderator", moderator_node)
+    builder.add_node("supervisor", supervisor_node)
     
-    # QA agent nodes - each uses Command for routing
+    # Domain expert nodes
     builder.add_node("catalog_qa", catalog_qa_node)
     builder.add_node("account_qa", account_qa_node)
-    builder.add_node("lyrics_qa", lyrics_qa_node)
     
-    # Tool nodes - each agent has its own, with retry policies for resilience
+    # Tool nodes with retry policies
     builder.add_node(
         "catalog_tools",
         catalog_tools_node,
@@ -81,39 +135,42 @@ def build_graph() -> StateGraph:
         account_tools_node,
         retry=RetryPolicy(max_attempts=3)
     )
-    builder.add_node(
-        "lyrics_tools",
-        lyrics_tools_node,
-        retry=RetryPolicy(max_attempts=3)
-    )
     
-    # Workflow nodes - use Command with interrupt() for HITL
-    builder.add_node("email_change", email_change_node)
-    builder.add_node("purchase_flow", purchase_flow_node)
+    # Subgraphs for workflows
+    builder.add_node("lyrics", lyrics_subgraph)
+    builder.add_node("purchase", purchase_subgraph)
+    builder.add_node("email_change", email_change_subgraph)
     
     # =========================================================================
     # ADD EDGES
     # =========================================================================
     
-    # Entry point: always start with router
-    builder.add_edge(START, "router")
+    # Entry: start with moderator
+    builder.add_edge(START, "moderator")
     
-    # Router uses Command to route - no conditional edges needed!
-    # (The router_node returns Command(goto="catalog_qa") etc.)
+    # Moderator uses Command to route to supervisor or end
+    # (No explicit edge needed - Command handles routing)
     
-    # Tool nodes always return to their owning agent - simple edges!
+    # Supervisor uses Command to route to domain experts
+    # (No explicit edge needed - Command handles routing)
+    
+    # Tool nodes return to their owning agent
     builder.add_edge("catalog_tools", "catalog_qa")
     builder.add_edge("account_tools", "account_qa")
-    builder.add_edge("lyrics_tools", "lyrics_qa")
     
-    # QA nodes use Command to route to:
-    # - their tools node (if tool calls)
-    # - router (if route change needed)
-    # - END (if done)
-    # No conditional edges needed!
+    # Lyrics subgraph handles both identification AND response handling
+    # Its internal router decides which flow based on lyrics_awaiting_response
+    # After lyrics completes, check if user confirmed purchase
+    builder.add_conditional_edges("lyrics", route_after_lyrics)
     
-    # Workflow nodes (email_change, purchase_flow) use Command
-    # to specify their next destination - no explicit edges needed
+    # Purchase and email_change subgraphs go to END when complete
+    builder.add_edge("purchase", END)
+    builder.add_edge("email_change", END)
+    
+    # Domain experts use Command to route to:
+    # - Their tools (if tool calls)
+    # - Subgraphs (if workflow needed)
+    # - END (if response complete)
     
     return builder
 
@@ -144,8 +201,6 @@ graph = build_graph().compile()
 
 if __name__ == "__main__":
     # Print the graph structure for debugging
-    from IPython.display import Image, display
-    
     builder = build_graph()
     compiled = builder.compile()
     

@@ -1,9 +1,10 @@
 """State model for the customer support bot.
 
-Defines the typed state that flows through all nodes in the graph.
+Simplified state following the principle of minimal core state.
+Flow-specific state is handled by subgraphs.
 """
 
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Literal
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -11,56 +12,34 @@ from typing_extensions import TypedDict
 
 
 class SupportState(TypedDict):
-    """State for the customer support bot graph.
+    """Core state for the customer support bot graph.
     
-    Attributes:
-        messages: Conversation history with add_messages reducer.
-        customer_id: Authenticated customer ID (never user-supplied).
-        route: Current route/lane for the conversation.
-        
-        # Email verification flow
-        pending_email: New email address awaiting verification.
-        verified: Whether email verification succeeded.
-        verification_attempts: Number of code entry attempts.
-        masked_phone: Masked phone number for display (e.g., "***-5555").
-        verification_code: Generated verification code (mock).
-        
-        # Purchase flow
-        pending_track_id: TrackId for pending purchase.
-        pending_track_name: Track name for display.
-        pending_track_price: Track price for confirmation.
-        
-        # Lyrics flow
-        pending_genius_title: Song title from Genius lookup.
-        pending_genius_artist: Artist name from Genius lookup.
-        in_catalog: Whether the identified song is in our catalog.
+    Follows the principle of minimal state:
+    - Core fields used everywhere: messages, customer_id
+    - Handoff context for subgraphs (set before entering, cleared after)
+    
+    Flow-specific state (email verification attempts, etc.) is managed
+    internally by subgraphs, not polluting the main state.
     """
     
     # Core state - always present
     messages: Annotated[list[BaseMessage], add_messages]
     customer_id: int
     
-    # Routing
-    route: Optional[str]
-    
-    # Email verification flow
-    pending_email: Optional[str]
-    verified: bool
-    verification_attempts: int
-    masked_phone: str
-    verification_code: Optional[str]  # For mock mode
-    verification_id: Optional[str]  # Twilio verification ID for real SMS
-    phone: Optional[str]  # Full phone number for Twilio
-    
-    # Purchase flow
+    # Purchase handoff context (set by catalog_qa or lyrics_qa before entering purchase subgraph)
+    # Cleared when purchase completes
     pending_track_id: Optional[int]
     pending_track_name: Optional[str]
     pending_track_price: Optional[float]
     
-    # Lyrics flow
-    pending_genius_title: Optional[str]
-    pending_genius_artist: Optional[str]
-    in_catalog: Optional[bool]
+    # Lyrics workflow context - conversational flow (NOT HITL)
+    # After lyrics identification, we ask user yes/no and wait for their NEXT message
+    lyrics_query: Optional[str]  # The lyrics the user provided
+    lyrics_awaiting_response: Optional[bool]  # True = waiting for user yes/no response
+    lyrics_song_in_catalog: Optional[bool]  # Was the identified song in our catalog?
+    lyrics_identified_song: Optional[str]  # Song name from identification
+    lyrics_identified_artist: Optional[str]  # Artist name from identification
+    lyrics_purchase_confirmed: Optional[bool]  # Set by lyrics subgraph when user confirms purchase
 
 
 def get_initial_state(customer_id: int = 1) -> dict:
@@ -75,22 +54,13 @@ def get_initial_state(customer_id: int = 1) -> dict:
     return {
         "messages": [],
         "customer_id": customer_id,
-        "route": None,
-        # Email verification
-        "pending_email": None,
-        "verified": False,
-        "verification_attempts": 0,
-        "masked_phone": "",
-        "verification_code": None,
-        "verification_id": None,
-        "phone": None,
-        # Purchase flow
         "pending_track_id": None,
         "pending_track_name": None,
         "pending_track_price": None,
-        # Lyrics flow
-        "pending_genius_title": None,
-        "pending_genius_artist": None,
-        "in_catalog": None,
+        "lyrics_query": None,
+        "lyrics_awaiting_response": None,
+        "lyrics_song_in_catalog": None,
+        "lyrics_identified_song": None,
+        "lyrics_identified_artist": None,
+        "lyrics_purchase_confirmed": None,
     }
-
