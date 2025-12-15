@@ -2,20 +2,26 @@
 
 Clean architecture following LangGraph best practices:
 - Moderator → Supervisor → Domain Experts → Subgraphs
-- catalog_qa is the "music brain" (handles browsing AND lyrics detection)
+- Supervisor is STATELESS - only routes based on intent (catalog vs account)
+- catalog_qa is the "music brain" - owns ALL music context including lyrics state
 - Lyrics subgraph is self-contained with internal router for both flows
 - Purchase subgraph uses HITL confirmation for actual purchase
 
-Lyrics Flow (CONVERSATIONAL - all self-contained in lyrics subgraph):
+Key Design Principle:
+  Supervisor = "What domain?" (stateless intent routing)
+  Domain Expert = "What task in my domain?" (owns workflow state)
+  Subgraph = "What phase of the workflow?" (self-contained)
 
-MODE 1 - New lyrics query (lyrics_awaiting_response = False):
-  1. User provides lyrics → catalog_qa routes to lyrics subgraph
+Lyrics Flow (CONVERSATIONAL):
+
+MODE 1 - New lyrics query:
+  1. User provides lyrics → supervisor → catalog_qa (detects lyrics) → lyrics subgraph
   2. Lyrics subgraph: router → identify_song → check_catalog → get_youtube → present_options
   3. present_options asks "Would you like to buy?" and sets lyrics_awaiting_response=True
   4. Turn ENDS - user sees the question
 
 MODE 2 - User response (lyrics_awaiting_response = True):
-  5. User responds "yes" or "no" → supervisor routes to lyrics subgraph
+  5. User responds "yes" or "no" → supervisor → catalog_qa (sees awaiting) → lyrics subgraph
   6. Lyrics subgraph: router → handle_response → sets lyrics_purchase_confirmed
   7. After subgraph ends, conditional edge routes to purchase if confirmed
 
@@ -25,44 +31,21 @@ Architecture:
                     └──────┬──────┘
                            │
                     ┌──────▼──────┐
-                    │  Supervisor │ ← Routes to domain experts
+                    │  Supervisor │ ← STATELESS: routes to domains only
                     └──────┬──────┘
                            │
               ┌────────────┴────────────┐
               ▼                         ▼
         ┌──────────┐              ┌──────────┐
         │CatalogQA │              │AccountQA │
+        │ (music   │              │ (account │
+        │  brain)  │              │  expert) │
         └────┬─────┘              └────┬─────┘
              │                         │
-    ┌────────┴────────┐           ┌────┴─────┐
-    ▼                 ▼           ▼          ▼
- tools             lyrics      tools    email_chg
-                   subgraph
-                      │
-        ┌─────────────┴─────────────┐
-        │    lyrics subgraph        │
-        │  ┌─────────────────────┐  │
-        │  │       router        │  │ ← checks lyrics_awaiting_response
-        │  └──────────┬──────────┘  │
-        │       ┌─────┴─────┐       │
-        │       ▼           ▼       │
-        │  identify_song  handle    │
-        │       │         _response │
-        │       ▼           │       │
-        │  check_catalog    │       │
-        │       │           │       │
-        │       ▼           │       │
-        │  get_youtube      │       │
-        │       │           │       │
-        │       ▼           │       │
-        │  present_options  │       │
-        └───────────────────┴───────┘
-                      │
-                      ▼
-            ┌─────────────────┐
-            │ if purchase     │──► purchase_subgraph
-            │ confirmed       │
-            └─────────────────┘
+    ┌────────┼────────┐           ┌────┼─────┐
+    ▼        ▼        ▼           ▼    ▼     ▼
+ tools    lyrics   purchase    tools email_chg
+          subgraph subgraph
 """
 
 from langgraph.graph import StateGraph, START, END

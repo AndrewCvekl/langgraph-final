@@ -66,21 +66,16 @@ Be decisive. Pick the single best route."""
 
 def supervisor_node(
     state: SupportState
-) -> Command[Literal["catalog_qa", "account_qa", "lyrics", "__end__"]]:
+) -> Command[Literal["catalog_qa", "account_qa", "__end__"]]:
     """Route to the appropriate domain expert.
     
-    Uses structured output for reliable routing.
+    Pure intent-based routing - no state checks here.
     catalog_qa handles all music-related queries including lyrics.
+    account_qa handles customer account info.
     
-    Special case: If lyrics_awaiting_response is True, route to lyrics subgraph
-    which will handle the user's yes/no via its internal router.
+    Workflow state (like lyrics_awaiting_response) is handled by domain experts,
+    not the supervisor. This keeps routing logic clean and stateless.
     """
-    
-    # Check if we're waiting for a lyrics yes/no response
-    if state.get("lyrics_awaiting_response"):
-        # Route to lyrics subgraph - its router will send to handle_response
-        return Command(goto="lyrics")
-    
     model = ChatOpenAI(model="gpt-4o", temperature=0)
     structured_model = model.with_structured_output(RouteDecision)
     

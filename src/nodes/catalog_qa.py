@@ -147,14 +147,26 @@ def catalog_qa_node(
 ) -> Command[Literal["catalog_tools", "lyrics", "purchase", "__end__"]]:
     """Handle catalog-related questions, lyrics identification, and purchases.
     
+    As the "music brain", catalog_qa owns all music-related context including:
+    - Browsing and searching the catalog
+    - Detecting lyrics intent and routing to lyrics subgraph
+    - Continuing lyrics conversations (when lyrics_awaiting_response is True)
+    - Initiating purchases
+    
     Routes:
-    - lyrics: When user provides lyrics (routes to lyrics subgraph)
+    - lyrics: When user provides lyrics OR when continuing a lyrics conversation
     - catalog_tools: When LLM wants to call catalog tools
     - purchase: When purchase intent detected (direct handoff to subgraph)
     - __end__: When response is complete
     """
     
-    # First, check if this is a lyrics identification request
+    # First, check if we're in the middle of a lyrics conversation
+    # (user is responding to "Would you like to purchase?" or "Want us to add it?")
+    if state.get("lyrics_awaiting_response"):
+        # Continue the lyrics conversation - subgraph's router will handle the response
+        return Command(goto="lyrics")
+    
+    # Check if this is a NEW lyrics identification request
     if _detect_lyrics_intent(state):
         # Route to lyrics subgraph - it will handle the identification workflow
         last_message = _get_last_user_message(state)
