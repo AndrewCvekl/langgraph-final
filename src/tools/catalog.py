@@ -9,6 +9,11 @@ from langchain_core.tools import tool
 from src.db import get_db
 
 
+def _escape_sql(value: str) -> str:
+    """Escape single quotes for SQL string literals."""
+    return value.replace("'", "''")
+
+
 @tool
 def list_genres() -> str:
     """List all available music genres in the store.
@@ -35,6 +40,7 @@ def artists_in_genre(genre_name: str) -> str:
         A list of artists that have tracks in the specified genre.
     """
     db = get_db()
+    safe_genre = _escape_sql(genre_name)
     result = db.run(
         f"""
         SELECT DISTINCT Artist.ArtistId, Artist.Name as ArtistName
@@ -42,7 +48,7 @@ def artists_in_genre(genre_name: str) -> str:
         JOIN Album ON Artist.ArtistId = Album.ArtistId
         JOIN Track ON Album.AlbumId = Track.AlbumId
         JOIN Genre ON Track.GenreId = Genre.GenreId
-        WHERE Genre.Name LIKE '%{genre_name}%'
+        WHERE Genre.Name LIKE '%{safe_genre}%'
         ORDER BY Artist.Name
         LIMIT 50;
         """,
@@ -62,12 +68,13 @@ def albums_by_artist(artist_name: str) -> str:
         A list of albums by the artist, including album ID and title.
     """
     db = get_db()
+    safe_artist = _escape_sql(artist_name)
     result = db.run(
         f"""
         SELECT Album.AlbumId, Album.Title as AlbumTitle, Artist.Name as ArtistName
         FROM Album
         JOIN Artist ON Album.ArtistId = Artist.ArtistId
-        WHERE Artist.Name LIKE '%{artist_name}%'
+        WHERE Artist.Name LIKE '%{safe_artist}%'
         ORDER BY Album.Title;
         """,
         include_columns=True
@@ -86,6 +93,7 @@ def tracks_in_album(album_title: str) -> str:
         A list of tracks with TrackId, name, duration, and price.
     """
     db = get_db()
+    safe_album = _escape_sql(album_title)
     result = db.run(
         f"""
         SELECT 
@@ -98,7 +106,7 @@ def tracks_in_album(album_title: str) -> str:
         FROM Track
         JOIN Album ON Track.AlbumId = Album.AlbumId
         JOIN Artist ON Album.ArtistId = Artist.ArtistId
-        WHERE Album.Title LIKE '%{album_title}%'
+        WHERE Album.Title LIKE '%{safe_album}%'
         ORDER BY Track.TrackId;
         """,
         include_columns=True
@@ -141,6 +149,7 @@ def find_track(track_query: str) -> str:
         )
     except ValueError:
         # Search by name
+        safe_query = _escape_sql(track_query)
         result = db.run(
             f"""
             SELECT 
@@ -155,7 +164,7 @@ def find_track(track_query: str) -> str:
             JOIN Album ON Track.AlbumId = Album.AlbumId
             JOIN Artist ON Album.ArtistId = Artist.ArtistId
             LEFT JOIN Genre ON Track.GenreId = Genre.GenreId
-            WHERE Track.Name LIKE '%{track_query}%'
+            WHERE Track.Name LIKE '%{safe_query}%'
             ORDER BY Track.Name
             LIMIT 20;
             """,
