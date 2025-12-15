@@ -26,23 +26,6 @@ from src.tools.catalog import (
 )
 
 
-class IntentClassification(BaseModel):
-    """Classify the user's intent."""
-    
-    intent: Literal["lyrics", "browse", "purchase", "other"] = Field(
-        description="""The user's intent:
-        - lyrics: User provided song lyrics and wants to identify the song
-        - browse: User wants to browse/search the catalog (genres, artists, albums, tracks)
-        - purchase: User wants to buy a specific track they already know
-        - other: General conversation or unclear intent
-        """
-    )
-    
-    reasoning: str = Field(
-        description="Brief explanation of why this intent was detected"
-    )
-
-
 class CatalogResponse(BaseModel):
     """Structured response from the catalog agent."""
     
@@ -123,28 +106,28 @@ def _get_last_user_message(state: SupportState) -> str:
 
 
 def _detect_lyrics_intent(state: SupportState) -> bool:
-    """Use LLM to detect if the user is asking about lyrics."""
-    model = ChatOpenAI(model="gpt-4o", temperature=0)
-    classifier = model.with_structured_output(IntentClassification)
+    """Detect if the user is asking about lyrics identification.
     
-    last_message = _get_last_user_message(state)
+    Simple keyword check - only triggers lyrics flow if the user
+    explicitly mentions lyrics-related terms. This prevents false positives
+    when users are just browsing tracks/albums with song names.
+    """
+    last_message = _get_last_user_message(state).lower()
     
-    classification = classifier.invoke([
-        SystemMessage(content="""Classify the user's intent for a music store chatbot.
-
-LYRICS intent means the user provided SONG LYRICS and wants to identify what song it is.
-Examples of LYRICS intent:
-- "What song goes 'we will rock you'?"
-- "Is this the real life, is this just fantasy"
-- "What song has the lyrics 'hello from the other side'?"
-
-BROWSE intent means they want to explore the catalog.
-PURCHASE intent means they want to buy a specific track.
-OTHER is for greetings, thanks, or unclear queries."""),
-        HumanMessage(content=last_message)
-    ])
+    lyrics_indicators = [
+        "lyrics",
+        "lyric", 
+        "what song goes",
+        "what song has",
+        "what song is",
+        "identify the song",
+        "identify this song",
+        "what's the song",
+        "name that song",
+        "which song goes",
+    ]
     
-    return classification.intent == "lyrics"
+    return any(indicator in last_message for indicator in lyrics_indicators)
 
 
 def catalog_qa_node(

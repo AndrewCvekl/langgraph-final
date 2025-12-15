@@ -2070,11 +2070,18 @@
                         let remaining = raw;
                         const rows = matches.map((m, idx) => {
                             remaining = remaining.replace(m[0], '');
+                            // Extract price from track name if not captured (e.g. "Song - $0.99")
+                            const trackName = cleanBold(m[2] || m[1]);
+                            let price = m[4] ? normalizePrice(m[4]) : '';
+                            if (!price) {
+                                const priceInName = trackName.match(/\$\s*([\d.]+)/);
+                                if (priceInName) price = normalizePrice(priceInName[1]);
+                            }
                             return {
                                 number: m[1] || String(idx + 1),
-                                name: cleanBold(m[2] || m[1]),
+                                name: trackName,
                                 trackId: m[3] || m[2] || '',
-                                price: normalizePrice(m[4] || m[3])
+                                price
                             };
                         });
                         return { tableData: rows, tableType: 'tracks', remaining: remaining.trim() };
