@@ -47,7 +47,7 @@ class CatalogResponse(BaseModel):
     """Structured response from the catalog agent."""
     
     response: str = Field(
-        description="The response message to show the user"
+        description="The response to the user's CURRENT/LATEST query. Focus only on what they just asked, not previous conversation topics."
     )
     
     purchase_track_id: Optional[int] = Field(
@@ -68,7 +68,12 @@ class CatalogResponse(BaseModel):
 
 CATALOG_SYSTEM_PROMPT = """You are a helpful music store assistant specializing in our catalog.
 
-You can help customers:
+## CRITICAL: Always respond to the user's LATEST message
+- Focus on what the user is asking NOW, not previous topics
+- If there was a previous purchase discussion that ended, move on
+- Each new query deserves a fresh, focused response
+
+## You can help customers:
 - Browse genres available in the store
 - Find artists in a specific genre
 - View albums by an artist
@@ -95,7 +100,7 @@ If a customer wants to buy a track:
 
 Examples:
 - "I want to buy Kashmir" → Use find_track("Kashmir"), then set purchase_track_id, name, price
-- "Show me rock artists" → Just respond, no purchase fields
+- "Show me rock artists" → Just respond with the list, no purchase fields
 
 Be helpful and conversational. If you can't find what they're looking for, suggest alternatives."""
 
