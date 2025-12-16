@@ -24,6 +24,7 @@ from src.tools.catalog import (
     tracks_in_album,
     find_track,
 )
+from src.tools.account import check_if_already_purchased
 
 
 class CatalogResponse(BaseModel):
@@ -132,18 +133,26 @@ def _detect_lyrics_intent(state: SupportState) -> bool:
     return any(indicator in last_message for indicator in lyrics_indicators)
 
 
-def _detect_previous_track_reference(state: SupportState) -> bool:
-    """Detect if the user is referring to a previously identified track.
+def _detect_previous_track_purchase_intent(state: SupportState) -> bool:
+    """Detect if user wants to PURCHASE a previously identified track.
     
-    Catches phrases like:
-    - "the song from before"
-    - "that track"
-    - "buy it"
-    - "purchase the song we talked about"
-    - "the one you found"
+    IMPORTANT: This requires BOTH:
+    1. Purchase intent (buy, purchase, get it, want it)
+    2. Reference to a previous track (from before, that song, it, etc.)
+    
+    Does NOT trigger for simple recall questions like "what was that song?"
     """
     last_message = _get_last_user_message(state).lower()
     
+    # Words indicating purchase intent - REQUIRED
+    purchase_words = ["buy", "purchase", "get", "want"]
+    has_purchase_intent = any(word in last_message for word in purchase_words)
+    
+    # If no purchase intent, don't trigger (fixes "what was the song from earlier?" bug)
+    if not has_purchase_intent:
+        return False
+    
+    # Reference to a previous track
     previous_track_indicators = [
         "song from before",
         "track from before",
@@ -156,26 +165,14 @@ def _detect_previous_track_reference(state: SupportState) -> bool:
         "the one you mentioned",
         "from earlier",
         "we just talked about",
-        "we were just",
         "you just found",
         "you just identified",
-    ]
-    
-    # Check for purchase intent combined with reference
-    purchase_with_reference = [
-        "buy it",
-        "purchase it",
-        "get it",
-        "want it",
+        " it",  # "buy it", "get it" - space prefix to avoid matching "with"
     ]
     
     has_previous_ref = any(indicator in last_message for indicator in previous_track_indicators)
-    has_purchase_ref = any(ref in last_message for ref in purchase_with_reference)
     
-    # Also check for simple "buy" + no specific track name (implies reference)
-    has_buy_intent = any(word in last_message for word in ["buy", "purchase"])
-    
-    return has_previous_ref or (has_purchase_ref and has_buy_intent)
+    return has_previous_ref
 
 
 def catalog_qa_node(
@@ -209,15 +206,32 @@ def catalog_qa_node(
             goto="lyrics"
         )
     
-    # Check if user is referring to a previously identified track (e.g., "buy the song from before")
+    # Check if user wants to PURCHASE a previously identified track (e.g., "buy the song from before")
     # This uses STATE for reliability instead of relying on LLM memory
-    if _detect_previous_track_reference(state):
+    if _detect_previous_track_purchase_intent(state):
         last_track_id = state.get("last_identified_track_id")
         last_track_name = state.get("last_identified_track_name")
         last_track_artist = state.get("last_identified_track_artist")
+        customer_id = state.get("customer_id", 1)
         
         if last_track_id and last_track_name:
-            # We have a previously identified track - use it directly!
+            # Check ownership FIRST before promising to set up purchase
+            config = {"configurable": {"customer_id": customer_id}}
+            ownership_check = check_if_already_purchased.invoke(
+                {"track_id": last_track_id}, 
+                config=config
+            )
+            
+            if "Yes" in ownership_check:
+                # Already owned - inform user directly, don't route to purchase
+                return Command(
+                    update={
+                        "messages": [AIMessage(content=f"Great news! You already own **{last_track_name}** by **{last_track_artist}** - it's in your library! Is there anything else I can help you with?")]
+                    },
+                    goto="__end__"
+                )
+            
+            # Not owned - proceed to purchase
             return Command(
                 update={
                     "messages": [AIMessage(content=f"Sure! Let me set up your purchase for **{last_track_name}** by **{last_track_artist}**...")],
