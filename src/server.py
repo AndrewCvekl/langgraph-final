@@ -150,13 +150,19 @@ async def stream_response(run_id: str):
         try:
             run["status"] = "running"
             current_node = None
-            # NOTE: No deduplication needed - graph-level Input/Output schemas prevent duplicates
             
-            for event in graph.stream(
+            # Use "updates" stream mode only
+            # 
+            # NOTE: We don't use "messages" mode because ALL nodes in this graph
+            # use structured output (with_structured_output) which generates internal JSON.
+            # The user-facing responses come from AIMessages added via Command updates.
+            # This gives a clean UX: tool calls show, then complete responses appear.
+            async for event in graph.astream(
                 run["input"],
                 config=config,
                 stream_mode="updates"
             ):
+                
                 # Check for interrupts
                 if "__interrupt__" in event:
                     interrupts = event["__interrupt__"]
@@ -167,7 +173,7 @@ async def stream_response(run_id: str):
                         yield f"data: {json.dumps({'type': 'interrupt', 'data': interrupt_value})}\n\n"
                     return
                 
-                # Process regular events
+                # Process regular node updates
                 for node_name, node_output in event.items():
                     if node_name.startswith("__"):
                         continue
@@ -182,13 +188,15 @@ async def stream_response(run_id: str):
                     if not node_output:
                         continue
                     
-                    # Process messages (no deduplication needed - graph handles it)
+                    # Process messages from updates (tool calls, tool results, final messages)
                     if "messages" in node_output:
                         for msg in node_output["messages"]:
                             if isinstance(msg, AIMessage):
+                                # Full AIMessage - check for tool calls first
                                 if msg.tool_calls:
                                     for tc in msg.tool_calls:
                                         yield f"data: {json.dumps({'type': 'tool_call', 'name': tc['name'], 'args': tc.get('args', {})})}\n\n"
+                                # Emit message content if present (the actual user-facing response)
                                 elif msg.content:
                                     yield f"data: {json.dumps({'type': 'message', 'content': msg.content})}\n\n"
                             elif isinstance(msg, ToolMessage):
@@ -213,6 +221,7 @@ async def stream_response(run_id: str):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Prevents nginx/proxy buffering issues
         }
     )
 
