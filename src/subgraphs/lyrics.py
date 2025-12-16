@@ -70,11 +70,17 @@ class LyricsOutputSchema(TypedDict):
     # Only NEW messages from this subgraph run
     messages: Annotated[list[BaseMessage], add_messages]
     
-    # Purchase handoff - set if user confirms purchase
+    # Purchase handoff - set if user confirms purchase (cleared on decline)
     lyrics_purchase_confirmed: Optional[bool]
     pending_track_id: Optional[int]
     pending_track_name: Optional[str]
     pending_track_price: Optional[float]
+    
+    # Last identified track - ALWAYS set when track found, NOT cleared on decline
+    # Used for "the song from before" type references
+    last_identified_track_id: Optional[int]
+    last_identified_track_name: Optional[str]
+    last_identified_track_artist: Optional[str]
 
 
 class LyricsInternalState(TypedDict):
@@ -105,6 +111,11 @@ class LyricsInternalState(TypedDict):
     pending_track_id: Optional[int]
     pending_track_name: Optional[str]
     pending_track_price: Optional[float]
+    
+    # Persistent track memory (not cleared on decline)
+    last_identified_track_id: Optional[int]
+    last_identified_track_name: Optional[str]
+    last_identified_track_artist: Optional[str]
 
 
 # =============================================================================
@@ -330,6 +341,10 @@ def present_options_node(state: LyricsInternalState) -> dict:
             "pending_track_id": None,
             "pending_track_name": None,
             "pending_track_price": None,
+            # ALWAYS persist the identified track for "the song from before" references
+            "last_identified_track_id": track_id,
+            "last_identified_track_name": song_title,
+            "last_identified_track_artist": artist,
         }
     
     # Case 2: Available for purchase
@@ -357,14 +372,23 @@ def present_options_node(state: LyricsInternalState) -> dict:
                 "pending_track_id": track_id,
                 "pending_track_name": song_title,
                 "pending_track_price": track_price,
+                # ALWAYS persist the identified track for "the song from before" references
+                "last_identified_track_id": track_id,
+                "last_identified_track_name": song_title,
+                "last_identified_track_artist": artist,
             }
         else:
+            # User declined - clear pending but KEEP last_identified for future reference
             return {
                 "messages": [AIMessage(content="No problem! Let me know if there's anything else I can help you with.")],
                 "lyrics_purchase_confirmed": False,
                 "pending_track_id": None,
                 "pending_track_name": None,
                 "pending_track_price": None,
+                # ALWAYS persist the identified track for "the song from before" references
+                "last_identified_track_id": track_id,
+                "last_identified_track_name": song_title,
+                "last_identified_track_artist": artist,
             }
     
     # Case 3: Not in catalog - ask about interest
@@ -391,6 +415,10 @@ def present_options_node(state: LyricsInternalState) -> dict:
                 "pending_track_id": None,
                 "pending_track_name": None,
                 "pending_track_price": None,
+                # Persist song info even if not in catalog (no track_id, but name/artist available)
+                "last_identified_track_id": None,
+                "last_identified_track_name": song_title,
+                "last_identified_track_artist": artist,
             }
         else:
             return {
@@ -399,6 +427,10 @@ def present_options_node(state: LyricsInternalState) -> dict:
                 "pending_track_id": None,
                 "pending_track_name": None,
                 "pending_track_price": None,
+                # Persist song info even if not in catalog (no track_id, but name/artist available)
+                "last_identified_track_id": None,
+                "last_identified_track_name": song_title,
+                "last_identified_track_artist": artist,
             }
 
 

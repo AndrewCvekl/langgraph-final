@@ -41,6 +41,13 @@ class SupportState(TypedDict):
     # Current user message for subgraph handoff (prevents message accumulation)
     # Set by parent nodes before routing to subgraphs that use Input/Output schemas
     current_user_message: Optional[str]
+    
+    # Last identified track - PERSISTS across workflow completion
+    # Used for "the song from before" type references
+    # NOT cleared when user declines purchase - only overwritten when new track identified
+    last_identified_track_id: Optional[int]
+    last_identified_track_name: Optional[str]
+    last_identified_track_artist: Optional[str]
 
 
 def get_initial_state(customer_id: int = 1) -> dict:
@@ -61,4 +68,7 @@ def get_initial_state(customer_id: int = 1) -> dict:
         "lyrics_query": None,
         "lyrics_purchase_confirmed": None,
         "current_user_message": None,
+        "last_identified_track_id": None,
+        "last_identified_track_name": None,
+        "last_identified_track_artist": None,
     }

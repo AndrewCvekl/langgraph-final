@@ -30,7 +30,7 @@ class CatalogResponse(BaseModel):
     """Structured response from the catalog agent."""
     
     response: str = Field(
-        description="The response to the user's CURRENT/LATEST query. Focus only on what they just asked, not previous conversation topics."
+        description="The response to the user's query. If they reference something from earlier in the conversation (like 'the song from before'), use that context."
     )
     
     purchase_track_id: Optional[int] = Field(
@@ -51,10 +51,10 @@ class CatalogResponse(BaseModel):
 
 CATALOG_SYSTEM_PROMPT = """You are a helpful music store assistant specializing in our catalog.
 
-## CRITICAL: Always respond to the user's LATEST message
-- Focus on what the user is asking NOW, not previous topics
-- If there was a previous purchase discussion that ended, move on
-- Each new query deserves a fresh, focused response
+## CONTEXT AWARENESS:
+- Always check the conversation history for context
+- When users say "the song from before", "that track", "it", etc., look back at the chat to find what they're referring to
+- If a song was previously identified (via lyrics or search), remember it for follow-up questions
 
 ## You can help customers:
 - Browse genres available in the store
@@ -77,12 +77,14 @@ CATALOG_SYSTEM_PROMPT = """You are a helpful music store assistant specializing 
 
 ## PURCHASE FLOW:
 If a customer wants to buy a track:
-1. FIRST use find_track to look it up and confirm it exists
-2. ONLY AFTER confirming, set the purchase fields in your response
-3. Include the TrackId, track name, and price
+1. First check if they're referring to a song from earlier in the conversation
+2. If it's a NEW track request, use find_track to look it up
+3. ONLY AFTER confirming the track exists, set the purchase fields in your response
+4. Include the TrackId, track name, and price
 
 Examples:
-- "I want to buy Kashmir" → Use find_track("Kashmir"), then set purchase_track_id, name, price
+- "I want to buy the song from before" → Check conversation history, find the previously mentioned track
+- "I want to buy Kashmir" → Use find_track("Kashmir"), then set purchase fields
 - "Show me rock artists" → Just respond with the list, no purchase fields
 
 Be helpful and conversational. If you can't find what they're looking for, suggest alternatives."""
@@ -130,6 +132,52 @@ def _detect_lyrics_intent(state: SupportState) -> bool:
     return any(indicator in last_message for indicator in lyrics_indicators)
 
 
+def _detect_previous_track_reference(state: SupportState) -> bool:
+    """Detect if the user is referring to a previously identified track.
+    
+    Catches phrases like:
+    - "the song from before"
+    - "that track"
+    - "buy it"
+    - "purchase the song we talked about"
+    - "the one you found"
+    """
+    last_message = _get_last_user_message(state).lower()
+    
+    previous_track_indicators = [
+        "song from before",
+        "track from before",
+        "the song we",
+        "the track we",
+        "that song",
+        "that track",
+        "the one you found",
+        "the one we found",
+        "the one you mentioned",
+        "from earlier",
+        "we just talked about",
+        "we were just",
+        "you just found",
+        "you just identified",
+    ]
+    
+    # Check for purchase intent combined with reference
+    purchase_with_reference = [
+        "buy it",
+        "purchase it",
+        "get it",
+        "want it",
+    ]
+    
+    has_previous_ref = any(indicator in last_message for indicator in previous_track_indicators)
+    has_purchase_ref = any(ref in last_message for ref in purchase_with_reference)
+    
+    # Also check for simple "buy" + no specific track name (implies reference)
+    has_buy_intent = any(word in last_message for word in ["buy", "purchase"])
+    
+    return has_previous_ref or (has_purchase_ref and has_buy_intent)
+
+
 def catalog_qa_node(
     state: SupportState
 ) -> Command[Literal["catalog_tools", "lyrics", "purchase", "__end__"]]:
@@ -138,7 +186,7 @@ def catalog_qa_node(
     As the "music brain", catalog_qa handles:
     - Browsing and searching the catalog
     - Detecting lyrics intent and routing to lyrics subgraph
-    - Initiating purchases
+    - Initiating purchases (including references to previously identified tracks)
     
     Routes:
     - lyrics: When user provides lyrics to identify
@@ -161,7 +209,35 @@ def catalog_qa_node(
             goto="lyrics"
         )
     
-    # Not lyrics - handle as normal catalog query
+    # Check if user is referring to a previously identified track (e.g., "buy the song from before")
+    # This uses STATE for reliability instead of relying on LLM memory
+    if _detect_previous_track_reference(state):
+        last_track_id = state.get("last_identified_track_id")
+        last_track_name = state.get("last_identified_track_name")
+        last_track_artist = state.get("last_identified_track_artist")
+        
+        if last_track_id and last_track_name:
+            # We have a previously identified track - use it directly!
+            return Command(
+                update={
+                    "messages": [AIMessage(content=f"Sure! Let me set up your purchase for **{last_track_name}** by **{last_track_artist}**...")],
+                    "pending_track_id": last_track_id,
+                    "pending_track_name": last_track_name,
+                    "pending_track_price": 0.99,  # Default price, purchase subgraph will verify
+                },
+                goto="purchase"
+            )
+        elif last_track_name:
+            # We have a track name but no ID (wasn't in catalog) - inform user
+            return Command(
+                update={
+                    "messages": [AIMessage(content=f"I remember we found **{last_track_name}** by **{last_track_artist}**, but unfortunately that track isn't available in our catalog for purchase. Would you like me to help you find something similar?")]
+                },
+                goto="__end__"
+            )
+        # No previous track in state - fall through to LLM handling
+    
+    # Not lyrics and not a previous track reference - handle as normal catalog query
     model = ChatOpenAI(model="gpt-4o", temperature=0)
     
     # Let LLM use tools if needed
