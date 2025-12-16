@@ -4,7 +4,7 @@ Simplified state following the principle of minimal core state.
 Flow-specific state is handled by subgraphs.
 """
 
-from typing import Annotated, Optional, Literal
+from typing import Annotated, Optional
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -18,28 +18,25 @@ class SupportState(TypedDict):
     - Core fields used everywhere: messages, customer_id
     - Handoff context for subgraphs (set before entering, cleared after)
     
-    Flow-specific state (email verification attempts, etc.) is managed
-    internally by subgraphs, not polluting the main state.
+    Flow-specific state (email verification attempts, lyrics identification 
+    progress, etc.) is managed internally by subgraphs, not polluting the main state.
     """
     
     # Core state - always present
     messages: Annotated[list[BaseMessage], add_messages]
     customer_id: int
     
-    # Purchase handoff context (set by catalog_qa or lyrics_qa before entering purchase subgraph)
+    # Purchase handoff context (set by catalog_qa or lyrics subgraph before entering purchase subgraph)
     # Cleared when purchase completes
     pending_track_id: Optional[int]
     pending_track_name: Optional[str]
     pending_track_price: Optional[float]
     
-    # Lyrics workflow context - conversational flow (NOT HITL)
-    # After lyrics identification, we ask user yes/no and wait for their NEXT message
-    lyrics_query: Optional[str]  # The lyrics the user provided
-    lyrics_awaiting_response: Optional[bool]  # True = waiting for user yes/no response
-    lyrics_song_in_catalog: Optional[bool]  # Was the identified song in our catalog?
-    lyrics_identified_song: Optional[str]  # Song name from identification
-    lyrics_identified_artist: Optional[str]  # Artist name from identification
-    lyrics_purchase_confirmed: Optional[bool]  # Set by lyrics subgraph when user confirms purchase
+    # Lyrics workflow - minimal handoff context
+    # lyrics_query: The original lyrics text for identification
+    # lyrics_purchase_confirmed: Set by lyrics subgraph when user confirms purchase
+    lyrics_query: Optional[str]
+    lyrics_purchase_confirmed: Optional[bool]
     
     # Current user message for subgraph handoff (prevents message accumulation)
     # Set by parent nodes before routing to subgraphs that use Input/Output schemas
@@ -62,10 +59,6 @@ def get_initial_state(customer_id: int = 1) -> dict:
         "pending_track_name": None,
         "pending_track_price": None,
         "lyrics_query": None,
-        "lyrics_awaiting_response": None,
-        "lyrics_song_in_catalog": None,
-        "lyrics_identified_song": None,
-        "lyrics_identified_artist": None,
         "lyrics_purchase_confirmed": None,
         "current_user_message": None,
     }

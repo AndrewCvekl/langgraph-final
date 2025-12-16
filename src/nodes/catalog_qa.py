@@ -135,14 +135,13 @@ def catalog_qa_node(
 ) -> Command[Literal["catalog_tools", "lyrics", "purchase", "__end__"]]:
     """Handle catalog-related questions, lyrics identification, and purchases.
     
-    As the "music brain", catalog_qa owns all music-related context including:
+    As the "music brain", catalog_qa handles:
     - Browsing and searching the catalog
     - Detecting lyrics intent and routing to lyrics subgraph
-    - Continuing lyrics conversations (when lyrics_awaiting_response is True)
     - Initiating purchases
     
     Routes:
-    - lyrics: When user provides lyrics OR when continuing a lyrics conversation
+    - lyrics: When user provides lyrics to identify
     - catalog_tools: When LLM wants to call catalog tools
     - purchase: When purchase intent detected (direct handoff to subgraph)
     - __end__: When response is complete
@@ -151,21 +150,9 @@ def catalog_qa_node(
     # Get the current user message for subgraph handoff
     last_message = _get_last_user_message(state)
     
-    # First, check if we're in the middle of a lyrics conversation
-    # (user is responding to "Would you like to purchase?" or "Want us to add it?")
-    if state.get("lyrics_awaiting_response"):
-        # Continue the lyrics conversation - pass current message for subgraph
-        # The subgraph uses Input/Output schemas, so we pass current_user_message
-        # instead of the full message history to prevent message accumulation
-        return Command(
-            update={"current_user_message": last_message},
-            goto="lyrics"
-        )
-    
-    # Check if this is a NEW lyrics identification request
+    # Check if this is a lyrics identification request
     if _detect_lyrics_intent(state):
-        # Route to lyrics subgraph - it will handle the identification workflow
-        # Pass both lyrics_query and current_user_message for the subgraph
+        # Route to lyrics subgraph - it handles identification with HITL
         return Command(
             update={
                 "lyrics_query": last_message,

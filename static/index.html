@@ -888,6 +888,77 @@
             box-shadow: 0 4px 12px color-mix(in oklab, var(--teal-500) 40%, transparent);
         }
 
+        /* Inline choice buttons (for non-modal interrupts) */
+        .inline-choice-container {
+            display: flex;
+            gap: 0.75rem;
+            margin-top: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .inline-choice-btn {
+            padding: 0.75rem 1.5rem;
+            border-radius: 9999px;
+            font-family: inherit;
+            font-size: 0.9375rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 2px solid;
+        }
+
+        .inline-choice-btn.primary {
+            background: linear-gradient(135deg, var(--teal-600), var(--teal-700));
+            border-color: var(--teal-600);
+            color: white;
+        }
+
+        .inline-choice-btn.primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px color-mix(in oklab, var(--teal-500) 40%, transparent);
+        }
+
+        .inline-choice-btn.secondary {
+            background: white;
+            border-color: var(--gray-300);
+            color: var(--gray-600);
+        }
+
+        .inline-choice-btn.secondary:hover {
+            border-color: var(--teal-600);
+            color: var(--teal-700);
+            transform: translateY(-2px);
+        }
+
+        .inline-choice-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        /* Input disabled state (during inline choice) */
+        .input-wrapper.disabled {
+            opacity: 0.6;
+            pointer-events: none;
+            background: var(--gray-100);
+        }
+
+        .input-wrapper.disabled .message-input {
+            background: var(--gray-100);
+        }
+
+        .input-disabled-notice {
+            text-align: center;
+            color: var(--gray-500);
+            font-size: 0.875rem;
+            padding: 0.5rem;
+            display: none;
+        }
+
+        .input-disabled-notice.visible {
+            display: block;
+        }
+
         /* Scrollbar */
         .messages-area::-webkit-scrollbar {
             width: 6px;
@@ -1427,7 +1498,8 @@
                             </svg>
                         </button>
                     </div>
-                    <p class="input-footer">Press Enter to send, Shift+Enter for new line</p>
+                    <p class="input-footer" id="input-footer">Press Enter to send, Shift+Enter for new line</p>
+                    <p class="input-disabled-notice" id="input-disabled-notice">Please select an option above to continue</p>
                 </div>
             </div>
         </div>
@@ -1482,6 +1554,7 @@
         let isProcessing = false;
         let loadingStateIndex = 0;
         let loadingInterval = null;
+        let inlineChoiceActive = false;  // Track if we're waiting for inline choice
         // NOTE: Deduplication removed - graph-level Input/Output schemas now prevent duplicates
         // let seenMessageContents = new Set();
 
@@ -1500,6 +1573,8 @@
         const interruptInputGroup = document.getElementById('interrupt-input-group');
         const interruptInput = document.getElementById('interrupt-input');
         const interruptSubmit = document.getElementById('interrupt-submit');
+        const inputFooter = document.getElementById('input-footer');
+        const inputDisabledNotice = document.getElementById('input-disabled-notice');
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
@@ -1889,13 +1964,20 @@
         }
 
         function showInterrupt(data) {
+            const interruptType = data.type || 'confirm';
+            
+            // For "choice" type, render inline buttons in chat instead of modal
+            if (interruptType === 'choice') {
+                showInlineChoice(data);
+                return;
+            }
+            
+            // For other types (confirm, input), use the modal
             interruptTitle.textContent = data.title || 'Input Required';
             
             // Format the message with better styling
             const message = data.message || 'Please provide your response:';
             interruptMessage.innerHTML = formatInterruptMessage(message);
-            
-            const interruptType = data.type || 'confirm';
             
             // Clear previous state
             interruptOptions.innerHTML = '';
@@ -1911,14 +1993,17 @@
                 interruptInputGroup.classList.add('hidden');
                 interruptOptions.style.display = 'flex';
                 
-                // Populate buttons from options
+                // Populate buttons from options (handle both string[] and object[] formats)
                 if (data.options && data.options.length > 0) {
                     data.options.forEach(option => {
                         const btn = document.createElement('button');
                         btn.className = 'interrupt-option';
-                        btn.textContent = option;
+                        // Support both {value, label} objects and plain strings
+                        const optValue = typeof option === 'object' ? option.value : option;
+                        const optLabel = typeof option === 'object' ? option.label : option;
+                        btn.textContent = optLabel;
                         btn.addEventListener('click', () => {
-                            submitInterrupt(option);
+                            submitInterrupt(optValue);
                         });
                         interruptOptions.appendChild(btn);
                     });
@@ -1926,6 +2011,187 @@
             }
             
             interruptOverlay.classList.remove('hidden');
+        }
+
+        function showInlineChoice(data) {
+            // Render choice buttons inline in the chat, not as a modal
+            const message = data.message || 'Please choose an option:';
+            
+            // Create a message element with inline buttons
+            const messageEl = document.createElement('div');
+            messageEl.className = 'message assistant';
+            messageEl.id = 'inline-choice-message';
+            
+            messageEl.innerHTML = `
+                <div class="message-avatar">${icons.music}</div>
+                <div class="message-content">
+                    <div class="message-bubble">
+                        <div class="inline-choice-container" id="inline-choice-buttons"></div>
+                    </div>
+                </div>
+            `;
+            
+            // Use the same rendering logic as regular messages
+            const bubbleEl = messageEl.querySelector('.message-bubble');
+            const buttonContainer = messageEl.querySelector('#inline-choice-buttons');
+            
+            // Render the message content with video support, then append buttons
+            renderInlineChoiceContent(bubbleEl, message, buttonContainer);
+            
+            messagesContainer.appendChild(messageEl);
+            
+            // Add the buttons
+            if (data.options && data.options.length > 0) {
+                data.options.forEach(option => {
+                    const btn = document.createElement('button');
+                    // Support both {value, label, style} objects and plain strings
+                    const optValue = typeof option === 'object' ? option.value : option;
+                    const optLabel = typeof option === 'object' ? option.label : option;
+                    const optStyle = typeof option === 'object' ? (option.style || 'secondary') : 'secondary';
+                    
+                    btn.className = `inline-choice-btn ${optStyle}`;
+                    btn.textContent = optLabel;
+                    btn.addEventListener('click', () => {
+                        handleInlineChoice(optValue, buttonContainer);
+                    });
+                    buttonContainer.appendChild(btn);
+                });
+            }
+            
+            // Disable input while waiting for choice
+            setInputDisabled(true);
+            
+            scrollToBottom();
+        }
+
+        function renderInlineChoiceContent(bubbleEl, content, buttonContainer) {
+            // Render content with YouTube video support, then ensure buttons are at the end
+            const raw = String(content ?? '');
+            
+            // Detect YouTube URLs
+            const ytRegex = /https?:\/\/(?:www\.)?(?:youtube\.com\/embed\/|youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})(?:[^\s]*)?/i;
+            const ytMatch = raw.match(ytRegex);
+            
+            if (ytMatch) {
+                // Has video - create structured layout
+                const wrapper = document.createElement('div');
+                wrapper.className = 'video-message-wrapper';
+                
+                // Get text without the URL
+                let textContent = raw.replace(ytMatch[0], '').trim();
+                
+                // Split at "Here's a video" to get header and footer
+                const videoIntroMatch = textContent.match(/^(.*?)(?:Here'?s a video[^:]*:?\s*)/i);
+                let headerText = '';
+                let footerText = '';
+                
+                if (videoIntroMatch) {
+                    headerText = videoIntroMatch[1].trim();
+                    footerText = textContent.slice(videoIntroMatch[0].length).trim();
+                } else {
+                    // Try splitting at common patterns
+                    const splitMatch = textContent.match(/^(.*?(?:by\s+\*\*[^*]+\*\*[!.]?))/i);
+                    if (splitMatch) {
+                        headerText = splitMatch[1].trim();
+                        footerText = textContent.slice(splitMatch[0].length).trim();
+                    } else {
+                        headerText = textContent;
+                    }
+                }
+                
+                // Create header
+                if (headerText) {
+                    const header = document.createElement('div');
+                    header.className = 'video-message-header';
+                    let headerHtml = headerText
+                        .replace(/🎵\s*/g, '')
+                        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+                        .replace(/\n/g, '<br>');
+                    header.innerHTML = `<div class="track-info"><span class="music-icon">${icons.music}</span> ${headerHtml}</div>`;
+                    wrapper.appendChild(header);
+                }
+                
+                // Add video thumbnail
+                wrapper.appendChild(createYouTubeThumbnailCard(ytMatch[1], ytMatch[0]));
+                
+                // Create footer
+                if (footerText) {
+                    const footer = document.createElement('div');
+                    footer.className = 'video-message-footer';
+                    let footerHtml = footerText
+                        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+                        .replace(/\n/g, '<br>');
+                    footer.innerHTML = footerHtml;
+                    wrapper.appendChild(footer);
+                }
+                
+                // Insert wrapper before buttons
+                bubbleEl.insertBefore(wrapper, buttonContainer);
+                
+                // Mark parent as having video for wider layout
+                const contentEl = bubbleEl.closest('.message-content');
+                if (contentEl) contentEl.classList.add('has-video');
+            } else {
+                // No video - simple text with markdown
+                const textEl = document.createElement('div');
+                textEl.className = 'message-text';
+                textEl.innerHTML = raw
+                    .replace(/🎵\s*/g, '<span class="music-icon">' + icons.music + '</span> ')
+                    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+                    .replace(/\n/g, '<br>');
+                bubbleEl.insertBefore(textEl, buttonContainer);
+            }
+        }
+
+        async function handleInlineChoice(value, buttonContainer) {
+            // Disable all buttons to prevent double-click
+            const buttons = buttonContainer.querySelectorAll('.inline-choice-btn');
+            buttons.forEach(btn => btn.disabled = true);
+            
+            // Re-enable input
+            setInputDisabled(false);
+            
+            // Show the user's response
+            addMessage('user', value);
+
+            statusIndicator.classList.remove('hidden');
+
+            try {
+                // Resume the interrupt
+                await fetch(`${API_BASE}/api/interrupt/${currentRunId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ resume_value: value })
+                });
+
+                // Continue streaming
+                await streamResponse(currentRunId);
+            } catch (error) {
+                console.error('Inline choice error:', error);
+                addMessage('assistant', 'Error resuming. Please try again.');
+                // Re-enable buttons on error
+                buttons.forEach(btn => btn.disabled = false);
+                setInputDisabled(true);
+            } finally {
+                statusIndicator.classList.add('hidden');
+            }
+        }
+
+        function setInputDisabled(disabled) {
+            inlineChoiceActive = disabled;
+            if (disabled) {
+                inputWrapper.classList.add('disabled');
+                messageInput.disabled = true;
+                sendButton.disabled = true;
+                inputFooter.style.display = 'none';
+                inputDisabledNotice.classList.add('visible');
+            } else {
+                inputWrapper.classList.remove('disabled');
+                messageInput.disabled = false;
+                sendButton.disabled = false;
+                inputFooter.style.display = 'block';
+                inputDisabledNotice.classList.remove('visible');
+            }
         }
 
         async function submitInterrupt(value) {

@@ -3,27 +3,21 @@
 Clean architecture following LangGraph best practices:
 - Moderator → Supervisor → Domain Experts → Subgraphs
 - Supervisor is STATELESS - only routes based on intent (catalog vs account)
-- catalog_qa is the "music brain" - owns ALL music context including lyrics state
-- Lyrics subgraph is self-contained with internal router for both flows
-- Purchase subgraph uses HITL confirmation for actual purchase
+- catalog_qa is the "music brain" - detects lyrics intent and routes to subgraph
+- All subgraphs use HITL (interrupt) for critical decisions
+- Consistent Input/Output schemas prevent message accumulation
 
 Key Design Principle:
   Supervisor = "What domain?" (stateless intent routing)
-  Domain Expert = "What task in my domain?" (owns workflow state)
-  Subgraph = "What phase of the workflow?" (self-contained)
+  Domain Expert = "What task in my domain?" (coordinates workflows)
+  Subgraph = "Self-contained workflow with HITL" (clean state isolation)
 
-Lyrics Flow (CONVERSATIONAL):
-
-MODE 1 - New lyrics query:
+Lyrics Flow (with HITL):
   1. User provides lyrics → supervisor → catalog_qa (detects lyrics) → lyrics subgraph
-  2. Lyrics subgraph: router → identify_song → check_catalog → get_youtube → present_options
-  3. present_options asks "Would you like to buy?" and sets lyrics_awaiting_response=True
-  4. Turn ENDS - user sees the question
-
-MODE 2 - User response (lyrics_awaiting_response = True):
-  5. User responds "yes" or "no" → supervisor → catalog_qa (sees awaiting) → lyrics subgraph
-  6. Lyrics subgraph: router → handle_response → sets lyrics_purchase_confirmed
-  7. After subgraph ends, conditional edge routes to purchase if confirmed
+  2. Lyrics subgraph: identify_song → check_catalog → get_youtube → present_options
+  3. present_options uses interrupt() to ask "Would you like to buy?"
+  4. User responds via inline buttons → resume interrupt
+  5. If confirmed, conditional edge routes to purchase subgraph
 
 Architecture:
                     ┌─────────────┐
@@ -141,8 +135,7 @@ def build_graph() -> StateGraph:
     builder.add_edge("catalog_tools", "catalog_qa")
     builder.add_edge("account_tools", "account_qa")
     
-    # Lyrics subgraph handles both identification AND response handling
-    # Its internal router decides which flow based on lyrics_awaiting_response
+    # Lyrics subgraph handles identification with HITL for purchase decision
     # After lyrics completes, check if user confirmed purchase
     builder.add_conditional_edges("lyrics", route_after_lyrics)
     
