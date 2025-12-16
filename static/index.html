@@ -2492,7 +2492,88 @@
                 return null;
             }
 
-            // Strategy 2: Inline track format
+            // Strategy 2: Album-grouped tracks with markdown headers
+            // Handles multiple formats:
+            // Format A: ### Album Name / - Track Name (TrackId: 123) - $0.99
+            // Format B: ### From "Album Name": / - Track Name - TrackId: 123, Price: $0.99
+            function detectAlbumGroupedTracks() {
+                const lines = raw.split('\n');
+                const rows = [];
+                const kept = [];
+                let currentAlbum = null;
+                let trackNumber = 0;
+                let foundAlbumHeader = false;
+                
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i];
+                    
+                    // Check for album header patterns:
+                    // - ### Album Name
+                    // - ### From "Album Name":
+                    // - **Album Name**
+                    const albumPatterns = [
+                        /^#{1,3}\s+From\s+[""]([^""]+)[""]:?\s*$/i,  // ### From "Album Name":
+                        /^#{1,3}\s+(.+?):?\s*$/,                      // ### Album Name or ### Album Name:
+                        /^\*\*([^*]+)\*\*\s*$/                        // **Album Name**
+                    ];
+                    
+                    let albumMatch = null;
+                    for (const pattern of albumPatterns) {
+                        albumMatch = line.match(pattern);
+                        if (albumMatch) break;
+                    }
+                    
+                    if (albumMatch) {
+                        currentAlbum = cleanBold(albumMatch[1]).trim();
+                        foundAlbumHeader = true;
+                        continue;
+                    }
+                    
+                    // Check for track line patterns:
+                    // Format A: - Track Name (TrackId: 123) - $0.99
+                    // Format B: - Track Name - TrackId: 123, Price: $0.99
+                    // Format C: - Track Name - TrackId: 123 - $0.99
+                    const trackPatterns = [
+                        // - Track (TrackId: 123) - $0.99
+                        /^[-•]\s+\*?\*?([^(*]+?)\*?\*?\s*\(TrackId:\s*(\d+)\)\s*[-–]\s*\$?([\d.]+)/i,
+                        // - Track - TrackId: 123, Price: $0.99
+                        /^[-•]\s+\*?\*?([^-*]+?)\*?\*?\s*[-–]\s*TrackId:\s*(\d+)(?:,\s*Price:\s*\$?([\d.]+))?/i,
+                        // - Track - TrackId: 123 - $0.99
+                        /^[-•]\s+\*?\*?([^-*]+?)\*?\*?\s*[-–]\s*TrackId:\s*(\d+)\s*[-–]\s*\$?([\d.]+)/i,
+                    ];
+                    
+                    let trackMatch = null;
+                    for (const pattern of trackPatterns) {
+                        trackMatch = line.match(pattern);
+                        if (trackMatch) break;
+                    }
+                    
+                    if (trackMatch && currentAlbum) {
+                        trackNumber++;
+                        rows.push({
+                            number: String(trackNumber),
+                            name: cleanBold(trackMatch[1]).trim(),
+                            album: currentAlbum,
+                            trackId: trackMatch[2],
+                            price: trackMatch[3] ? normalizePrice(trackMatch[3]) : '$0.99'
+                        });
+                        continue;
+                    }
+                    
+                    // Keep non-matching lines that aren't empty
+                    if (line.trim() && !albumMatch) {
+                        kept.push(line);
+                    }
+                }
+                
+                // Only return if we found album headers AND tracks
+                if (rows.length >= 2 && foundAlbumHeader) {
+                    return { tableData: rows, tableType: 'tracks', remaining: kept.join('\n').trim() };
+                }
+                return null;
+            }
+
+            // Strategy 3: Inline track format
             // Format: "1. **Song Name** - TrackId: 123, Price: $0.99" or variations
             function detectInlineTracks() {
                 const patterns = [
@@ -3105,6 +3186,7 @@
             // Execute strategies in order of specificity
             const strategies = [
                 detectTrackBlocks,
+                detectAlbumGroupedTracks,  // Tracks grouped under album headers (### Album Name)
                 detectInlineTracks,
                 detectPurchaseHistory,
                 detectInvoiceLineItems,

@@ -28,6 +28,7 @@ ACCOUNT_SYSTEM_PROMPT = """You are a helpful customer service assistant for a mu
 - Check the conversation history for information you've already shown the user
 - If they ask "what was my phone?" or "show me that again", look at previous messages first
 - Don't make them repeat requests - recall what you've already shared when possible
+- If in the conversation history they made changes to their email, make sure to reference the newest version!
 
 You can help customers with their account:
 - View their profile information (name, email, phone, address)
@@ -61,39 +62,94 @@ def _get_last_user_message(state: SupportState) -> str:
     return ""
 
 
+def _email_recently_discussed(state: SupportState) -> bool:
+    """Check if email was discussed in recent conversation.
+    
+    Looks at the last few messages to see if email was mentioned,
+    either by user asking about it or system showing it.
+    """
+    messages = state.get("messages", [])
+    # Check last 6 messages for email context
+    recent_messages = messages[-6:] if len(messages) > 6 else messages
+    
+    for msg in recent_messages:
+        content = ""
+        if isinstance(msg, HumanMessage):
+            content = msg.content.lower()
+        elif isinstance(msg, AIMessage):
+            content = msg.content.lower() if msg.content else ""
+        
+        # Check if email was discussed
+        if any(word in content for word in ["email", "e-mail", "@"]):
+            return True
+    
+    return False
+
+
 def _detect_email_change_intent(state: SupportState) -> bool:
-    """Detect if user EXPLICITLY wants to change their email.
+    """Detect if user wants to change their email.
     
-    Uses deterministic keyword detection instead of LLM interpretation.
-    This prevents false positives when conversation history is full of
-    email change context but user is asking about something else.
+    Uses deterministic keyword detection with context awareness:
+    1. VIEW intent takes priority - "show me my email" should NOT trigger change
+    2. Explicit phrases trigger ("change my email")
+    3. Email + change words trigger ("update email")
+    4. "change it" triggers if email was recently discussed
     
-    Only triggers for EXPLICIT email change requests in the CURRENT message.
+    This balances reliability with conversational flexibility.
     """
     last_message = _get_last_user_message(state).lower()
     
+    # VIEW INTENT - If user wants to VIEW their email, don't trigger change flow
+    # This takes priority over everything else
+    view_words = ["show", "what is", "what's", "display", "see", "view", "tell me"]
+    has_view_intent = any(word in last_message for word in view_words)
+    
+    # If viewing AND mentions email but NOT explicit change action, skip
+    if has_view_intent and "change" not in last_message and "update" not in last_message:
+        return False
+    
     # Must have both email-related word AND change-related word
     email_words = ["email", "e-mail", "mail address"]
-    change_words = ["change", "update", "modify", "edit", "new", "different", "switch"]
+    # NOTE: "new" removed - too ambiguous ("show my new email" vs "I want a new email")
+    change_words = ["change", "update", "modify", "edit", "different", "switch"]
     
     has_email = any(word in last_message for word in email_words)
     has_change = any(word in last_message for word in change_words)
     
-    # Explicit phrases that always trigger
+    # Explicit phrases that always trigger - must be ACTION-oriented
     explicit_phrases = [
         "change my email",
         "update my email",
-        "new email",
         "different email",
         "change email",
         "update email",
         "modify my email",
         "edit my email",
+        "i want a new email",
+        "i need a new email",
+        "set a new email",
+        "give me a new email",
     ]
     
     has_explicit = any(phrase in last_message for phrase in explicit_phrases)
     
-    return has_explicit or (has_email and has_change)
+    # Contextual reference: "change it", "update it", "can I change it"
+    # Only triggers if email was recently discussed
+    contextual_phrases = [
+        "change it",
+        "update it",
+        "modify it",
+        "edit it",
+        "can i change",
+        "want to change",
+        "like to change",
+        "need to change",
+    ]
+    
+    has_contextual = any(phrase in last_message for phrase in contextual_phrases)
+    email_in_context = _email_recently_discussed(state) if has_contextual else False
+    
+    return has_explicit or (has_email and has_change) or (has_contextual and email_in_context)
 
 
 def account_qa_node(

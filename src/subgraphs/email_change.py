@@ -81,7 +81,7 @@ def _get_customer_phone(customer_id: int) -> str:
     result = db.run(
         f"SELECT Phone FROM Customer WHERE CustomerId = {customer_id};"
     )
-    phone = result.strip().replace("(", "").replace(")", "").replace("'", "").replace(",", "")
+    phone = result.strip().replace("[", "").replace("]", "").replace("(", "").replace(")", "").replace("'", "").replace(",", "")
     return phone if phone else ""
 
 

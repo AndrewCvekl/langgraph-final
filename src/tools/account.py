@@ -177,6 +177,8 @@ def update_my_email(new_email: str, config: RunnableConfig) -> str:
     old_email_result = db.run(
         f"SELECT Email FROM Customer WHERE CustomerId = {customer_id};"
     )
+    # Clean up database result formatting
+    old_email = old_email_result.strip().replace("[", "").replace("]", "").replace("(", "").replace(")", "").replace("'", "").replace(",", "")
     
     # Update the email
     db.run(
@@ -187,6 +189,6 @@ def update_my_email(new_email: str, config: RunnableConfig) -> str:
         """
     )
     
-    return f"Email updated successfully! Old: {old_email_result.strip()}, New: {new_email}"
+    return f"Email updated successfully!\n\n**Old:** {old_email}\n**New:** {new_email}"
 
 
