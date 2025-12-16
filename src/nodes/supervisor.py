@@ -23,22 +23,27 @@ from src.state import SupportState
 class RouteDecision(BaseModel):
     """Structured output for routing decisions."""
     
-    route: Literal["catalog", "account", "end"] = Field(
+    route: Literal["catalog", "account", "chitchat"] = Field(
         description="""The domain to route to:
         - catalog: Questions about music (browsing, searching, purchasing, lyrics identification)
         - account: Questions about profile, invoices, purchase history, email changes
-        - end: Conversation is complete, user said goodbye
+        - chitchat: Pleasantries, greetings, thanks, goodbyes, or non-actionable messages
         """
     )
     
     reasoning: str = Field(
         description="Brief explanation of why this route was chosen"
     )
+    
+    chitchat_response: str = Field(
+        default="",
+        description="If route is chitchat, provide a brief friendly response appropriate to the user's message"
+    )
 
 
 SUPERVISOR_SYSTEM_PROMPT = """You are a customer service supervisor for a digital music store.
 
-Your job is to route customers to the right specialist based on what they're asking about.
+Your job is to route customers to the right specialist OR respond directly to simple pleasantries.
 
 ## Routes:
 
@@ -52,26 +57,32 @@ Your job is to route customers to the right specialist based on what they're ask
    - Profile info, invoices, purchase history
    - Changing their email address, billing questions
 
-3. **end**: When the conversation is DONE - user says goodbye, thanks and leaves, etc.
+3. **chitchat**: For pleasantries and non-actionable messages:
+   - Greetings: "hi", "hello", "hey" → warm welcome, mention you can help with music or account questions
+   - Thanks: "thanks", "thank you", "no problem", "ok", "cool", "great" → polite acknowledgment
+   - Goodbyes: "bye", "goodbye", "see ya" → friendly farewell
+   - Small talk or unclear intent → friendly redirect to what you can help with
 
 ## Guidelines:
 
 - Route based on the user's latest message
-- Greetings like "hi" or "hello" → catalog (default starting point for browsing)
+- If the message has NO actionable intent (just pleasantries), use chitchat and provide a response
 - Any music-related query including lyrics → catalog
 - "Change my email" → account (email changes are account management)
 
+When routing to chitchat, ALWAYS provide a brief, contextual response in chitchat_response.
 Be decisive. Pick the single best route."""
 
 
 def supervisor_node(
     state: SupportState
 ) -> Command[Literal["catalog_qa", "account_qa", "__end__"]]:
-    """Route to the appropriate domain expert.
+    """Route to the appropriate domain expert or handle chitchat directly.
     
     Pure intent-based routing - no state checks here.
     catalog_qa handles all music-related queries including lyrics.
     account_qa handles customer account info.
+    chitchat is handled directly here with a friendly response.
     
     Workflow state (like lyrics_awaiting_response) is handled by domain experts,
     not the supervisor. This keeps routing logic clean and stateless.
@@ -83,13 +94,18 @@ def supervisor_node(
     
     decision: RouteDecision = structured_model.invoke(messages)
     
-    # Map route names to node names
+    # Handle chitchat directly - respond and end
+    if decision.route == "chitchat":
+        response = decision.chitchat_response or "Happy to help! Let me know if you have any questions about our music catalog or your account."
+        return Command(
+            update={"messages": [AIMessage(content=response)]},
+            goto="__end__"
+        )
+    
+    # Route to domain experts
     route_to_node = {
         "catalog": "catalog_qa",
-        "account": "account_qa", 
-        "end": "__end__",
+        "account": "account_qa",
     }
     
-    goto_node = route_to_node[decision.route]
-    
-    return Command(goto=goto_node)
+    return Command(goto=route_to_node[decision.route])
