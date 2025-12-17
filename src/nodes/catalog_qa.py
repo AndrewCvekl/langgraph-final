@@ -10,11 +10,12 @@ catalog_qa is the "music brain" - it handles browsing AND detects lyrics intent.
 """
 
 from typing import Literal, Optional
+import json
+import ast
 
-from langchain_core.messages import SystemMessage, AIMessage, HumanMessage
+from langchain_core.messages import SystemMessage, AIMessage, HumanMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from langgraph.types import Command
-from pydantic import BaseModel, Field
 
 from src.state import SupportState
 from src.tools.catalog import (
@@ -25,29 +26,6 @@ from src.tools.catalog import (
     find_track,
 )
 from src.tools.account import check_if_already_purchased
-
-
-class CatalogResponse(BaseModel):
-    """Structured response from the catalog agent."""
-    
-    response: str = Field(
-        description="The response to the user's query. If they reference something from earlier in the conversation (like 'the song from before'), use that context."
-    )
-    
-    purchase_track_id: Optional[int] = Field(
-        default=None,
-        description="TrackId if the user wants to purchase a track (only set after confirming track exists)"
-    )
-    
-    purchase_track_name: Optional[str] = Field(
-        default=None,
-        description="Track name for purchase confirmation"
-    )
-    
-    purchase_track_price: Optional[float] = Field(
-        default=None,
-        description="Track price for purchase confirmation"
-    )
 
 
 CATALOG_SYSTEM_PROMPT = """You are a helpful music store assistant specializing in our catalog.
@@ -76,17 +54,14 @@ CATALOG_SYSTEM_PROMPT = """You are a helpful music store assistant specializing 
 - Price
 - Artist and album info
 
-## PURCHASE FLOW:
-If a customer wants to buy a track:
-1. First check if they're referring to a song from earlier in the conversation
-2. If it's a NEW track request, use find_track to look it up
-3. ONLY AFTER confirming the track exists, set the purchase fields in your response
-4. Include the TrackId, track name, and price
+## PURCHASE GUIDANCE:
+When showing track details, tell the user they can say "buy it" or "purchase it" to start the purchase flow.
+Do NOT ask "Would you like to proceed with the purchase?" or similar yes/no questions.
+Instead, say something like: "If you'd like to purchase this track, just say 'buy it'!"
 
-Examples:
-- "I want to buy the song from before" → Check conversation history, find the previously mentioned track
-- "I want to buy Kashmir" → Use find_track("Kashmir"), then set purchase fields
-- "Show me rock artists" → Just respond with the list, no purchase fields
+Examples of good responses after showing track info:
+- "Here's the track info! Say 'buy it' if you want to purchase."
+- "Found it! Let me know if you want to buy it."
 
 Be helpful and conversational. If you can't find what they're looking for, suggest alternatives."""
 
@@ -106,6 +81,85 @@ def _get_last_user_message(state: SupportState) -> str:
         if isinstance(msg, HumanMessage):
             return msg.content.strip()
     return ""
+
+
+def _extract_track_from_tool_results(state: SupportState) -> Optional[dict]:
+    """Extract track info from recent tool results.
+    
+    When user browses tracks (via find_track or tracks_in_album), we should
+    remember the track(s) shown so "buy it" can work.
+    
+    Returns dict with track_id, track_name, artist, price if found, else None.
+    Only returns info if there's a SINGLE track or a clearly focused track.
+    """
+    messages = state.get("messages", [])
+    last_msg = _get_last_user_message(state).lower().strip()
+    
+    # Look at recent messages for tool results - use larger window for longer conversations
+    # We search backwards to find the most recent relevant tool result
+    for msg in reversed(messages[-20:]):
+        if isinstance(msg, ToolMessage):
+            try:
+                # Parse the tool result
+                content = msg.content
+                data = None
+                
+                if isinstance(content, str):
+                    # Try JSON first (standard format)
+                    try:
+                        data = json.loads(content)
+                    except json.JSONDecodeError:
+                        # Try Python literal syntax (single quotes, etc.)
+                        try:
+                            data = ast.literal_eval(content)
+                        except (ValueError, SyntaxError):
+                            continue
+                elif isinstance(content, list):
+                    # Already a Python list
+                    data = content
+                else:
+                    continue
+                
+                # Check if it's a list that contains tracks (has TrackId)
+                if isinstance(data, list) and len(data) > 0:
+                    first_item = data[0]
+                    if not isinstance(first_item, dict) or "TrackId" not in first_item:
+                        # Not a track list (might be albums, genres, etc.)
+                        continue
+                    
+                    # If single track, use it
+                    if len(data) == 1:
+                        track = data[0]
+                        return {
+                            "track_id": track.get("TrackId"),
+                            "track_name": track.get("TrackName", "Unknown Track"),
+                            "artist": track.get("ArtistName", "Unknown Artist"),
+                            "price": track.get("UnitPrice", 0.99)
+                        }
+                    
+                    # Multiple tracks - check if user asked about a specific one
+                    for track in data:
+                        if isinstance(track, dict) and "TrackName" in track:
+                            track_name = track.get("TrackName", "")
+                            track_name_lower = track_name.lower()
+                            
+                            # Match if track name is in user message OR user message matches track name
+                            # This handles both "Letterbomb" and "play letterbomb" cases
+                            if track_name_lower and (
+                                track_name_lower in last_msg or 
+                                last_msg in track_name_lower or
+                                track_name_lower == last_msg
+                            ):
+                                return {
+                                    "track_id": track.get("TrackId"),
+                                    "track_name": track_name,
+                                    "artist": track.get("ArtistName", "Unknown Artist"),
+                                    "price": track.get("UnitPrice", 0.99)
+                                }
+            except Exception:
+                continue
+    
+    return None
 
 
 def _detect_lyrics_intent(state: SupportState) -> bool:
@@ -175,6 +229,49 @@ def _detect_previous_track_purchase_intent(state: SupportState) -> bool:
     return has_previous_ref
 
 
+def _detect_purchase_confirmation(state: SupportState) -> bool:
+    """Detect if user is confirming a purchase with simple 'yes' when track info is in state.
+    
+    This handles the case where:
+    1. User views a track (state has last_identified_track_id)
+    2. Bot asks if they want to buy (shouldn't happen with new prompt, but might)
+    3. User says "yes" or "sure" or similar
+    
+    Only triggers for SHORT confirmatory responses when track info exists.
+    """
+    last_message = _get_last_user_message(state).lower().strip()
+    
+    # Only trigger for short messages (avoids false positives)
+    if len(last_message) > 30:
+        return False
+    
+    # Must have track info in state
+    if not state.get("last_identified_track_id"):
+        return False
+    
+    # Simple confirmation phrases
+    confirmation_phrases = [
+        "yes",
+        "yeah",
+        "yep",
+        "yup",
+        "sure",
+        "ok",
+        "okay",
+        "confirm",
+        "yes please",
+        "yes i do",
+        "i do",
+        "definitely",
+        "absolutely",
+        "let's do it",
+        "go ahead",
+        "proceed",
+    ]
+    
+    return any(last_message == phrase or last_message.startswith(phrase + " ") for phrase in confirmation_phrases)
+
+
 def catalog_qa_node(
     state: SupportState
 ) -> Command[Literal["catalog_tools", "lyrics", "purchase", "__end__"]]:
@@ -195,6 +292,15 @@ def catalog_qa_node(
     # Get the current user message for subgraph handoff
     last_message = _get_last_user_message(state)
     
+    # Extract track info from recent tool results and store in state
+    # This enables "buy it" to work after browsing tracks
+    track_info = _extract_track_from_tool_results(state)
+    state_updates = {}
+    if track_info:
+        state_updates["last_identified_track_id"] = track_info["track_id"]
+        state_updates["last_identified_track_name"] = track_info["track_name"]
+        state_updates["last_identified_track_artist"] = track_info["artist"]
+    
     # Check if this is a lyrics identification request
     if _detect_lyrics_intent(state):
         # Route to lyrics subgraph - it handles identification with HITL
@@ -206,9 +312,10 @@ def catalog_qa_node(
             goto="lyrics"
         )
     
-    # Check if user wants to PURCHASE a previously identified track (e.g., "buy the song from before")
+    # Check if user wants to PURCHASE a previously identified track
+    # Handles: "buy the song from before", "buy it", "get it", or simple "yes" confirmation
     # This uses STATE for reliability instead of relying on LLM memory
-    if _detect_previous_track_purchase_intent(state):
+    if _detect_previous_track_purchase_intent(state) or _detect_purchase_confirmation(state):
         last_track_id = state.get("last_identified_track_id")
         last_track_name = state.get("last_identified_track_name")
         last_track_artist = state.get("last_identified_track_artist")
@@ -261,38 +368,23 @@ def catalog_qa_node(
     response = model_with_tools.invoke(messages)
     
     # If the model wants to call tools, route to tool node
+    # Still include state_updates in case we extracted track info before the LLM call
     if response.tool_calls:
         return Command(
-            update={"messages": [response]},
+            update={"messages": [response], **state_updates},
             goto="catalog_tools"
         )
     
-    # No tool calls - try to get structured response for purchase detection
-    try:
-        structured_model = model.with_structured_output(CatalogResponse)
-        structured_response = structured_model.invoke(messages + [response])
-        
-        # Check for purchase intent
-        if structured_response.purchase_track_id:
-            return Command(
-                update={
-                    "messages": [AIMessage(content=structured_response.response)],
-                    "pending_track_id": structured_response.purchase_track_id,
-                    "pending_track_name": structured_response.purchase_track_name,
-                    "pending_track_price": structured_response.purchase_track_price or 0.99,
-                },
-                goto="purchase"  # Direct handoff to purchase subgraph
-            )
-        
-        # Normal response
-        return Command(
-            update={"messages": [AIMessage(content=structured_response.response)]},
-            goto="__end__"
-        )
-        
-    except Exception:
-        # Fallback to unstructured response
-        return Command(
-            update={"messages": [response]},
-            goto="__end__"
-        )
+    # No tool calls - return response directly
+    # Purchase detection is handled by:
+    # 1. _detect_previous_track_purchase_intent() - catches "buy the song from before"
+    # 2. User explicitly naming a track - LLM calls find_track, then user says "buy it"
+    # 
+    # NOTE: We removed the structured output double-call pattern here.
+    # It was causing context pollution bugs (e.g., after lyrics identification,
+    # asking "show me genres" would return info about the previous song).
+    # See account_qa.py for the same fix.
+    return Command(
+        update={"messages": [response], **state_updates},
+        goto="__end__"
+    )
